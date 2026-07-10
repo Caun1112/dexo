@@ -145,6 +145,70 @@
         }
       }
     },
+    "add_forum.challenge.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Challenge"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "去过盾"
+          }
+        }
+      }
+    },
+    "add_forum.challenge.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This forum requires a Cloudflare verification before it can be added. Complete the challenge, then tap Add Forum again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加此论坛前需要完成 Cloudflare 验证。请先完成过盾，然后再次点击“添加论坛”。"
+          }
+        }
+      }
+    },
+    "add_forum.challenge.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloudflare Verification Required"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要过盾"
+          }
+        }
+      }
+    },
+    "add_forum.error.challenge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloudflare verification is required. Complete it, then try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要完成 Cloudflare 验证，请先过盾后再重试。"
+          }
+        }
+      }
+    },
     "add_forum.error.connect %@" : {
       "localizations" : {
         "en" : {

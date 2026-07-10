@@ -100,10 +100,20 @@ final class AddForumViewController: ObservableViewController {
     @objc private func addTapped() {
         viewModel.urlString = urlTextField.text ?? ""
         Task {
-            let success = await viewModel.addForum()
-            if success {
+            switch await viewModel.addForum() {
+            case .added:
                 onForumAdded?()
                 dismiss(animated: true)
+
+            case .challengeRequired:
+                presentChallengePrompt(
+                    title: String(localized: "add_forum.challenge.title"),
+                    message: String(localized: "add_forum.challenge.message"),
+                    actionTitle: String(localized: "add_forum.challenge.action")
+                )
+
+            case .failed:
+                break
             }
         }
     }

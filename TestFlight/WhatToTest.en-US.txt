@@ -1,3 +1,6 @@
 What to Test
 
-
+- Try adding a Cloudflare-protected linux.do forum. Confirm the app shows a challenge prompt with an Open Challenge action.
+- Complete the challenge, return to Add Forum, and tap Add Forum again to verify the forum is added successfully.
+- Cancel the challenge or leave it incomplete and confirm the forum is not added.
+- Verify existing linux.do challenge prompts from forum features still open the same challenge page.

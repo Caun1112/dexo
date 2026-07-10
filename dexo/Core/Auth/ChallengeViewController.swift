@@ -2,6 +2,26 @@ import UIKit
 import WebKit
 
 extension UIViewController {
+    /// Presents the shared Cloudflare challenge prompt and opens the existing
+    /// linux.do challenge page when the user chooses to continue.
+    func presentChallengePrompt(
+        title: String = String(localized: "challenge.prompt.title"),
+        message: String = String(localized: "challenge.prompt.message"),
+        actionTitle: String = String(localized: "me.challenge")
+    ) {
+        let alert = UIAlertController(
+            title: title,
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: actionTitle, style: .default) { [weak self] _ in
+            guard let self else { return }
+            ChallengeViewController.present(from: self)
+        })
+        present(alert, animated: true)
+    }
+
     /// If `error` indicates the request was intercepted by Cloudflare's
     /// challenge, prompts the user to pass it. Returns true if the prompt was
     /// shown, so callers can suppress generic error alerts on that path.
@@ -16,17 +36,7 @@ extension UIViewController {
         guard (error as? DiscourseAPIError)?.isChallengeRequired == true else {
             return false
         }
-        let alert = UIAlertController(
-            title: String(localized: "challenge.prompt.title"),
-            message: String(localized: "challenge.prompt.message"),
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
-        alert.addAction(UIAlertAction(title: String(localized: "me.challenge"), style: .default) { [weak self] _ in
-            guard let self else { return }
-            ChallengeViewController.present(from: self)
-        })
-        present(alert, animated: true)
+        presentChallengePrompt()
         return true
     }
 }

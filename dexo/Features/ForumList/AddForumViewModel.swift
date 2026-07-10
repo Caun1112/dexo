@@ -2,17 +2,31 @@ import Foundation
 
 import Perception
 
+enum AddForumResult {
+    case added
+    case challengeRequired
+    case failed
+}
+
 @Perceptible
 final class AddForumViewModel {
+    typealias BasicInfoLoader = (String) async throws -> DiscourseBasicInfo
+
     var urlString = ""
     var isLoading = false
     var errorMessage: String?
 
-    func addForum() async -> Bool {
+    private let basicInfoLoader: BasicInfoLoader?
+
+    init(basicInfoLoader: BasicInfoLoader? = nil) {
+        self.basicInfoLoader = basicInfoLoader
+    }
+
+    func addForum() async -> AddForumResult {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             errorMessage = String(localized: "add_forum.error.empty_url")
-            return false
+            return .failed
         }
 
         let normalized: String
@@ -20,19 +34,25 @@ final class AddForumViewModel {
             normalized = try ForumURLPolicy.normalize(trimmed)
         } catch ForumURLPolicy.ValidationError.insecureScheme {
             errorMessage = String(localized: "add_forum.error.https_required")
-            return false
+            return .failed
         } catch {
             errorMessage = String(localized: "add_forum.error.invalid_url")
-            return false
+            return .failed
         }
 
         isLoading = true
         errorMessage = nil
 
+        let tempForum = ForumInstance.new(title: "", baseURL: normalized)
+        let api = DiscourseAPI(forum: tempForum)
+
         do {
-            let tempForum = ForumInstance.new(title: "", baseURL: normalized)
-            let api = DiscourseAPI(forum: tempForum)
-            let info = try await api.fetchBasicInfo()
+            let info: DiscourseBasicInfo
+            if let basicInfoLoader {
+                info = try await basicInfoLoader(normalized)
+            } else {
+                info = try await api.fetchBasicInfo()
+            }
 
             var forum = ForumInstance.new(
                 title: info.title,
@@ -42,11 +62,20 @@ final class AddForumViewModel {
             forum.sortOrder = (try? DatabaseManager.shared.nextForumSortOrder()) ?? 0
             try DatabaseManager.shared.saveForum(&forum)
             isLoading = false
-            return true
+            return .added
         } catch {
+            if api.isLinuxDo,
+               let apiError = error as? DiscourseAPIError,
+               apiError.isChallengeRequired
+            {
+                errorMessage = String(localized: "add_forum.error.challenge")
+                isLoading = false
+                return .challengeRequired
+            }
+
             errorMessage = String(localized: "add_forum.error.connect \(error.localizedDescription)")
             isLoading = false
-            return false
+            return .failed
         }
     }
 
