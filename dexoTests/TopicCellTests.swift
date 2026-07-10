@@ -38,6 +38,32 @@ final class TopicCellTests: XCTestCase {
         XCTAssertTrue(cell.accessibilityLabel?.contains("one, two, three") == true)
     }
 
+    func testTagBadgesUseTightCenteredIntrinsicWidth() throws {
+        let topic = try decodeTopic(tags: ["ai", "ios", "swift"])
+        let cell = TopicCell(style: .default, reuseIdentifier: nil)
+        cell.bounds = CGRect(x: 0, y: 0, width: 390, height: 1)
+        cell.contentView.bounds = cell.bounds
+
+        cell.configure(
+            with: topic,
+            avatarURL: nil,
+            categoryName: nil,
+            categoryColor: nil
+        )
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+
+        let aiBadge = try XCTUnwrap(labels(in: cell).first { $0.text == "ai" })
+        let countBadge = try XCTUnwrap(labels(in: cell).first { $0.text == "+1" })
+
+        XCTAssertEqual(aiBadge.textAlignment, .center)
+        XCTAssertEqual(countBadge.textAlignment, .center)
+
+        let aiTextWidth = ("ai" as NSString).size(withAttributes: [.font: aiBadge.font as Any]).width
+        XCTAssertEqual(aiBadge.intrinsicContentSize.width, aiTextWidth + 10, accuracy: 1)
+        XCTAssertLessThan(aiBadge.intrinsicContentSize.width - aiTextWidth, 12)
+    }
+
     func testCellFontsAndSelfSizingGrowAtLargeAppFontSetting() throws {
         let settings = AppSettings.shared
         let originalLevel = settings.fontSizeLevel

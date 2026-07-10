@@ -78,9 +78,10 @@ final class TopicCell: UITableViewCell {
         let stack = UIStackView()
         stack.axis = .horizontal
         stack.alignment = .center
+        stack.distribution = .fill
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        stack.setContentHuggingPriority(.required, for: .horizontal)
         stack.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         return stack
     }()
@@ -354,11 +355,13 @@ final class TopicCell: UITableViewCell {
         label.font = font
         label.textColor = ThemeManager.shared.accentColor.withAlphaComponent(0.82)
         label.backgroundColor = ThemeManager.shared.codeBackgroundColor
+        label.textAlignment = .center
+        label.numberOfLines = 1
         label.lineBreakMode = .byTruncatingTail
         label.layer.cornerRadius = 7
         label.layer.masksToBounds = true
         label.isAccessibilityElement = false
-        label.setContentHuggingPriority(preservesText ? .required : .defaultHigh, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
         label.setContentCompressionResistancePriority(preservesText ? .required : .defaultLow, for: .horizontal)
         return label
     }
@@ -394,13 +397,13 @@ final class TopicCell: UITableViewCell {
 }
 
 private final class TopicTagBadgeLabel: UILabel {
-    private let contentInsets = UIEdgeInsets(top: 2, left: 7, bottom: 2, right: 7)
+    private let contentInsets = UIEdgeInsets(top: 2, left: 5, bottom: 2, right: 5)
 
     override var intrinsicContentSize: CGSize {
-        let size = super.intrinsicContentSize
+        let textSize = ((text ?? "") as NSString).size(withAttributes: [.font: font as Any])
         return CGSize(
-            width: size.width + contentInsets.left + contentInsets.right,
-            height: size.height + contentInsets.top + contentInsets.bottom
+            width: ceil(textSize.width) + contentInsets.left + contentInsets.right,
+            height: ceil(font.lineHeight) + contentInsets.top + contentInsets.bottom
         )
     }
 
