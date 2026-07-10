@@ -133,7 +133,7 @@ final class CategoriesViewController: ObservableViewController {
 
     @objc private func pullToRefresh() {
         Task {
-            await viewModel.loadCategories()
+            await viewModel.loadCategories(forceRefresh: true)
             refreshControl.endRefreshing()
         }
     }

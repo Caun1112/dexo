@@ -219,14 +219,10 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
                 {
                     forum = updated
                 }
+            } catch AuthError.cancelled {
+                // The user intentionally closed the system auth sheet.
             } catch {
-                let alert = UIAlertController(
-                    title: "Login Failed",
-                    message: error.localizedDescription,
-                    preferredStyle: .alert
-                )
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
+                presentLoginFailure()
             }
         }
     }
@@ -267,8 +263,11 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
                         self.forum = updated
                     }
                     action()
+                } catch AuthError.cancelled {
+                    // Keep the auth gate closed without showing an error for
+                    // an intentional cancellation.
                 } catch {
-                    // Login failed or cancelled — do nothing
+                    self.presentLoginFailure()
                 }
             }
         })
@@ -286,17 +285,31 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         let vc = WebLoginViewController(targetURL: url) { [weak self] cookies, userAgent in
             guard let self else { return }
             Task {
-                await self.authManager.loginViaWeb(forum: self.forum, cookies: cookies, userAgent: userAgent)
-                if let forums = try? DatabaseManager.shared.fetchAllForums(),
-                   let updated = forums.first(where: { $0.id == self.forum.id })
-                {
-                    self.forum = updated
+                do {
+                    try await self.authManager.loginViaWeb(forum: self.forum, cookies: cookies, userAgent: userAgent)
+                    if let forums = try? DatabaseManager.shared.fetchAllForums(),
+                       let updated = forums.first(where: { $0.id == self.forum.id })
+                    {
+                        self.forum = updated
+                    }
+                    action()
+                } catch {
+                    self.presentLoginFailure()
                 }
-                action()
             }
         }
         let nav = UINavigationController(rootViewController: vc)
         present(nav, animated: true)
+    }
+
+    private func presentLoginFailure() {
+        let alert = UIAlertController(
+            title: String(localized: "login.failed.title"),
+            message: String(localized: "login.failed.message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+        present(alert, animated: true)
     }
 
     func isAuthenticated() -> Bool {

@@ -73,7 +73,7 @@ private final class ReadTopicsViewModel {
     private func loadCategoriesIfNeeded() async {
         guard categoriesById.isEmpty else { return }
         do {
-            let list = try await api.fetchCategories()
+            let list = try await api.fetchAllCategories()
             indexCategories(list.categoryList.categories)
         } catch {
             // Silently fail
@@ -193,6 +193,11 @@ final class ReadTopicsViewController: ObservableViewController {
             return topic.id
         }
         snapshot.appendItems(uniqueIds, toSection: 0)
+        let currentIds = Set(dataSource.snapshot().itemIdentifiers)
+        let idsToRefresh = uniqueIds.filter { currentIds.contains($0) }
+        if !idsToRefresh.isEmpty {
+            snapshot.reconfigureItems(idsToRefresh)
+        }
         dataSource.apply(snapshot, animatingDifferences: true)
 
         if viewModel.isLoading {

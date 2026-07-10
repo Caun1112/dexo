@@ -33,9 +33,6 @@ final class AuthManager: @unchecked Sendable {
     func login(forum: ForumInstance, presentationAnchor: ASPresentationAnchor) async throws {
         let baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
-        // Clean up any existing web login data to ensure isolation
-        cleanupWebAuthData(for: baseURL)
-
         // 1. Generate RSA key pair
         let privateKey: SecKey
         do {
@@ -115,9 +112,10 @@ final class AuthManager: @unchecked Sendable {
                 session.start()
             }
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-            // User cancelled — silently clean up
+            // Cancellation is not a successful login. Preserve any existing
+            // credential and let callers keep the auth gate closed.
             KeychainHelper.deleteRSAKeyPair(for: baseURL)
-            return
+            throw AuthError.cancelled
         } catch {
             KeychainHelper.deleteRSAKeyPair(for: baseURL)
             throw AuthError.browserSessionFailed(error)
@@ -157,7 +155,12 @@ final class AuthManager: @unchecked Sendable {
 
         debugLog("[AuthManager] Auth success! Key length: \(authPayload.key.count)")
 
-        // 8. Store API key in Keychain
+        // 8. Store API key in Keychain. Capture the old state first, but do
+        // not clear or revoke it until the new credential is safely persisted.
+        let previousCredential = KeychainHelper.getUserApiKey(for: baseURL)
+        let previousWebSession = previousCredential == AuthManager.webAuthSentinel
+            ? webSessionSnapshot(baseURL: baseURL, username: usernameCache[baseURL] ?? forum.username)
+            : nil
         do {
             try KeychainHelper.saveUserApiKey(authPayload.key, for: baseURL)
         } catch {
@@ -165,28 +168,66 @@ final class AuthManager: @unchecked Sendable {
             throw error
         }
 
+        if let previousCredential {
+            if previousCredential == AuthManager.webAuthSentinel {
+                if let previousWebSession {
+                    endWebSession(previousWebSession)
+                }
+                WebCookieStore.shared.clearCookies(for: baseURL)
+            } else if previousCredential != authPayload.key {
+                revokeApiKey(previousCredential, baseURL: baseURL)
+            }
+        }
+
         // Clean up RSA key pair (no longer needed)
         KeychainHelper.deleteRSAKeyPair(for: baseURL)
 
         // 9. Fetch current user to get username
         await fetchAndCacheUsername(baseURL: baseURL, forum: forum)
+        postAuthChange(for: baseURL)
     }
 
     static let webAuthSentinel = "__web__"
 
     /// Called after WebLoginViewController successfully captures cookies.
     /// Saves the sentinel key so isAuthenticated returns true, then fetches the username.
-    func loginViaWeb(forum: ForumInstance, cookies: [HTTPCookie], userAgent: String?) async {
+    func loginViaWeb(forum: ForumInstance, cookies: [HTTPCookie], userAgent: String?) async throws {
         let baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
-        // Clean up any existing API key login data to ensure isolation
-        cleanupApiKeyAuthData(for: baseURL)
+        guard let baseHost = URL(string: baseURL)?.host,
+              cookies.contains(where: {
+                  $0.name == "_t"
+                      && ($0.expiresDate.map { $0 > Date() } ?? true)
+                      && WebCookieStore.cookieDomain($0.domain, matchesHost: baseHost)
+              })
+        else {
+            throw AuthError.missingWebSession
+        }
 
+        let previousCredential = KeychainHelper.getUserApiKey(for: baseURL)
+        let previousWebSession = previousCredential == AuthManager.webAuthSentinel
+            ? webSessionSnapshot(baseURL: baseURL, username: usernameCache[baseURL] ?? forum.username)
+            : nil
+
+        // Persist the new auth marker before touching either the previous API
+        // key or the previous web session.
+        try KeychainHelper.saveUserApiKey(AuthManager.webAuthSentinel, for: baseURL)
+
+        if let previousCredential, previousCredential != AuthManager.webAuthSentinel {
+            revokeApiKey(previousCredential, baseURL: baseURL)
+        } else if let previousWebSession,
+                  !Self.sameWebSession(previousWebSession.cookies, cookies)
+        {
+            endWebSession(previousWebSession)
+        }
+
+        WebCookieStore.shared.clearCookies(for: baseURL)
         WebCookieStore.shared.setCookies(cookies)
-        WebCookieStore.shared.userAgent = userAgent
-        try? KeychainHelper.saveUserApiKey(AuthManager.webAuthSentinel, for: baseURL)
+        WebCookieStore.shared.userAgent = userAgent ?? previousWebSession?.userAgent
+        KeychainHelper.deleteRSAKeyPair(for: baseURL)
 
         await fetchAndCacheUsername(baseURL: baseURL, forum: forum)
+        postAuthChange(for: baseURL)
     }
 
     // MARK: - Username Fetching
@@ -218,47 +259,57 @@ final class AuthManager: @unchecked Sendable {
 
     // MARK: - Auth Isolation Helpers
 
-    /// Cleans up web login artifacts (cookies, user agent, CSRF) before switching to API key auth.
-    private func cleanupWebAuthData(for baseURL: String) {
-        if let existingKey = KeychainHelper.getUserApiKey(for: baseURL),
-           existingKey == AuthManager.webAuthSentinel
-        {
-            // Server-side session cleanup
-            if let username = usernameCache[baseURL] {
-                let api = DiscourseAPI(baseURL: baseURL)
-                Task { await api.deleteSession(username: username) }
-            }
-        }
-        WebCookieStore.shared.clearCookies(for: baseURL)
-        NotificationCenter.default.post(name: .discourseAuthDidChange, object: nil, userInfo: ["baseURL": baseURL])
+    private struct WebSessionSnapshot {
+        let baseURL: String
+        let cookies: [HTTPCookie]
+        let userAgent: String?
+        let username: String?
     }
 
-    /// Cleans up API key artifacts (revoke key, delete RSA pair) before switching to web auth.
-    private func cleanupApiKeyAuthData(for baseURL: String) {
-        if let existingKey = KeychainHelper.getUserApiKey(for: baseURL),
-           existingKey != AuthManager.webAuthSentinel
-        {
-            // Revoke the API key on the server
-            let api = DiscourseAPI(baseURL: baseURL)
-            Task { await api.revokeApiKey(apiKey: existingKey) }
+    private func webSessionSnapshot(baseURL: String, username: String?) -> WebSessionSnapshot? {
+        guard let url = URL(string: baseURL)?
+            .appendingPathComponent("session")
+            .appendingPathComponent("csrf.json")
+        else {
+            return nil
         }
-        KeychainHelper.deleteUserApiKey(for: baseURL)
-        KeychainHelper.deleteRSAKeyPair(for: baseURL)
+        return WebSessionSnapshot(
+            baseURL: baseURL,
+            cookies: WebCookieStore.shared.cookies(for: url),
+            userAgent: WebCookieStore.shared.userAgent,
+            username: username
+        )
+    }
+
+    private static func sameWebSession(_ lhs: [HTTPCookie], _ rhs: [HTTPCookie]) -> Bool {
+        let lhsTokens = Set(lhs.filter { $0.name == "_t" }.map(\.value))
+        let rhsTokens = Set(rhs.filter { $0.name == "_t" }.map(\.value))
+        return !lhsTokens.isEmpty && !lhsTokens.isDisjoint(with: rhsTokens)
+    }
+
+    private func endWebSession(_ snapshot: WebSessionSnapshot) {
+        Task { await Self.deleteWebSession(snapshot) }
+    }
+
+    private func revokeApiKey(_ apiKey: String, baseURL: String) {
+        Task { await Self.revokeApiKeyOnServer(apiKey, baseURL: baseURL) }
     }
 
     func logout(forum: ForumInstance) {
         let baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
-        let api = DiscourseAPI(baseURL: baseURL)
         if let apiKey = KeychainHelper.getUserApiKey(for: baseURL) {
             if apiKey == AuthManager.webAuthSentinel {
-                // Web login — delete server session
-                if let username = usernameCache[baseURL] {
-                    Task { await api.deleteSession(username: username) }
+                // Snapshot Cookie and UA before clearing local state so the
+                // asynchronous server logout cannot race with that cleanup.
+                if let snapshot = webSessionSnapshot(
+                    baseURL: baseURL,
+                    username: usernameCache[baseURL] ?? forum.username
+                ) {
+                    endWebSession(snapshot)
                 }
             } else {
-                // API key login — revoke the key
-                Task { await api.revokeApiKey(apiKey: apiKey) }
+                revokeApiKey(apiKey, baseURL: baseURL)
             }
         }
 
@@ -266,12 +317,28 @@ final class AuthManager: @unchecked Sendable {
         KeychainHelper.deleteRSAKeyPair(for: baseURL)
         WebCookieStore.shared.clearCookies(for: baseURL)
         usernameCache.removeValue(forKey: baseURL)
-        NotificationCenter.default.post(name: .discourseAuthDidChange, object: nil, userInfo: ["baseURL": baseURL])
 
         // Clear username from DB
         var forumToUpdate = forum
         forumToUpdate.username = nil
         _ = try? DatabaseManager.shared.saveForum(&forumToUpdate)
+        postAuthChange(for: baseURL)
+    }
+
+    /// Removes credentials for a saved URL without contacting that forum.
+    /// Used when migrating a legacy HTTP record, since attempting server-side
+    /// revocation would itself make a request to an address that is no longer
+    /// allowed by the app's transport policy.
+    func clearLocalAuthentication(for baseURL: String) {
+        let normalized = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let credentialKeys = Set([baseURL, normalized])
+        for key in credentialKeys {
+            KeychainHelper.deleteUserApiKey(for: key)
+            KeychainHelper.deleteRSAKeyPair(for: key)
+            usernameCache.removeValue(forKey: key)
+        }
+        WebCookieStore.shared.clearCookies(for: normalized)
+        postAuthChange(for: normalized)
     }
 
     func restoreAuthState(for forum: ForumInstance) {
@@ -279,6 +346,134 @@ final class AuthManager: @unchecked Sendable {
         if let username = forum.username, isAuthenticated(for: baseURL) {
             usernameCache[baseURL] = username
         }
+    }
+
+    private func postAuthChange(for baseURL: String) {
+        NotificationCenter.default.post(
+            name: .discourseAuthDidChange,
+            object: nil,
+            userInfo: ["baseURL": baseURL]
+        )
+    }
+
+    private static func revokeApiKeyOnServer(_ apiKey: String, baseURL: String) async {
+        guard ForumURLPolicy.isSecure(baseURL),
+              let url = URL(string: baseURL)?
+              .appendingPathComponent("user-api-key")
+              .appendingPathComponent("revoke")
+        else { return }
+
+        let session = ephemeralAuthSession()
+        defer { session.finishTasksAndInvalidate() }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "User-Api-Key")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        _ = try? await session.data(for: request)
+    }
+
+    private static func deleteWebSession(_ snapshot: WebSessionSnapshot) async {
+        guard ForumURLPolicy.isSecure(snapshot.baseURL),
+              let rootURL = URL(string: snapshot.baseURL),
+              !snapshot.cookies.isEmpty
+        else { return }
+
+        let session = ephemeralAuthSession()
+        defer { session.finishTasksAndInvalidate() }
+
+        var username = snapshot.username
+        if username == nil {
+            let currentURL = rootURL
+                .appendingPathComponent("session")
+                .appendingPathComponent("current.json")
+            if let (data, response) = try? await session.data(
+                for: webRequest(url: currentURL, snapshot: snapshot)
+            ),
+                (response as? HTTPURLResponse).map({ 200 ..< 300 ~= $0.statusCode }) == true
+            {
+                username = (try? JSONDecoder().decode(CurrentSessionEnvelope.self, from: data))?
+                    .currentUser?.username
+            }
+        }
+        guard let username, !username.isEmpty else { return }
+
+        let csrfURL = rootURL
+            .appendingPathComponent("session")
+            .appendingPathComponent("csrf.json")
+        guard let (csrfData, csrfResponse) = try? await session.data(
+            for: webRequest(url: csrfURL, snapshot: snapshot)
+        ),
+            (csrfResponse as? HTTPURLResponse).map({ 200 ..< 300 ~= $0.statusCode }) == true,
+            let csrf = try? JSONDecoder().decode(CSRFEnvelope.self, from: csrfData).csrf,
+            !csrf.isEmpty
+        else { return }
+
+        let logoutURL = rootURL
+            .appendingPathComponent("session")
+            .appendingPathComponent(username)
+        var request = webRequest(url: logoutURL, snapshot: snapshot)
+        request.httpMethod = "DELETE"
+        request.setValue(csrf, forHTTPHeaderField: "X-CSRF-Token")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        _ = try? await session.data(for: request)
+    }
+
+    private static func webRequest(url: URL, snapshot: WebSessionSnapshot) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(
+            snapshot.cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; "),
+            forHTTPHeaderField: "Cookie"
+        )
+        if let userAgent = snapshot.userAgent {
+            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        }
+        return request
+    }
+
+    private static func ephemeralAuthSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 30
+        return URLSession(
+            configuration: configuration,
+            delegate: RejectRedirectsDelegate(),
+            delegateQueue: nil
+        )
+    }
+
+    private struct CSRFEnvelope: Decodable {
+        let csrf: String
+    }
+
+    private struct CurrentSessionEnvelope: Decodable {
+        struct CurrentUser: Decodable {
+            let username: String
+        }
+
+        let currentUser: CurrentUser?
+
+        enum CodingKeys: String, CodingKey {
+            case currentUser = "current_user"
+        }
+    }
+}
+
+private final class RejectRedirectsDelegate: NSObject, URLSessionTaskDelegate {
+    nonisolated func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
 
@@ -292,16 +487,20 @@ extension Notification.Name {
 // MARK: - Errors
 
 enum AuthError: Error, LocalizedError {
+    case cancelled
     case keyGenerationFailed(Error)
     case invalidURL
     case browserSessionFailed(Error)
     case missingPayload
     case decryptionFailed(Error)
     case nonceMismatch
+    case missingWebSession
     case unknownError
 
     var errorDescription: String? {
         switch self {
+        case .cancelled:
+            return "Authentication was cancelled"
         case .keyGenerationFailed(let error):
             return "Key generation failed: \(error.localizedDescription)"
         case .invalidURL:
@@ -314,6 +513,8 @@ enum AuthError: Error, LocalizedError {
             return "Decryption failed: \(error.localizedDescription)"
         case .nonceMismatch:
             return "Nonce mismatch — possible replay attack"
+        case .missingWebSession:
+            return "No valid web session cookie was found"
         case .unknownError:
             return "Unknown authentication error"
         }

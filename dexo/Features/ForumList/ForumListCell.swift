@@ -66,9 +66,14 @@ final class ForumListCell: UITableViewCell {
         titleLabel.text = forum.title
         urlLabel.text = forum.baseURL
 
-        if let iconURLString = forum.iconURL, let iconURL = URL(string: iconURLString) {
+        if ForumURLPolicy.isSecure(forum.baseURL),
+           let iconURLString = forum.iconURL,
+           let iconURL = URL(string: iconURLString),
+           iconURL.scheme?.lowercased() == "https"
+        {
             iconImageView.sd_setImage(with: iconURL, placeholderImage: UIImage(systemName: "globe"), options: [], context: ImageCacheManager.shared.avatarContext)
         } else {
+            iconImageView.sd_cancelCurrentImageLoad()
             iconImageView.image = UIImage(systemName: "globe")
         }
     }

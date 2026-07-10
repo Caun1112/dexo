@@ -8,7 +8,7 @@ final class AddForumViewController: ObservableViewController {
 
     private let urlTextField: UITextField = {
         let tf = UITextField()
-        tf.placeholder = "https://forum.example.com"
+        tf.placeholder = String(localized: "add_forum.url_placeholder")
         tf.borderStyle = .roundedRect
         tf.autocapitalizationType = .none
         tf.autocorrectionType = .no

@@ -31,6 +31,7 @@ let project = Project(
             sources: [
                 .glob("dexo/**", excluding: [
                     "dexo/Info.plist",
+                    "dexo/PrivacyInfo.xcprivacy",
                     "dexo/Assets.xcassets/**",
                     "dexo/AppIcon.icon/**",
                     "dexo/AppIconWhite.icon/**",
@@ -50,6 +51,7 @@ let project = Project(
                 .glob(pattern: "dexo/AppIconForest.icon/**"),
                 .glob(pattern: "dexo/Localizable.xcstrings"),
                 .glob(pattern: "dexo/Core/aliases.json"),
+                .glob(pattern: "dexo/PrivacyInfo.xcprivacy"),
             ]),
             dependencies: [
                 .external(name: "Alamofire"),
@@ -86,6 +88,26 @@ let project = Project(
                     "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
                     "SWIFT_VERSION": "5.0",
                     "TARGETED_DEVICE_FAMILY": "1,2",
+                ]
+            )
+        ),
+        .target(
+            name: "dexoTests",
+            destinations: .iOS,
+            product: .unitTests,
+            bundleId: "com.eilgnaw.dexoTests",
+            deploymentTargets: .iOS("15.0"),
+            infoPlist: .default,
+            sources: ["dexoTests/**"],
+            dependencies: [
+                .target(name: "dexo"),
+            ],
+            settings: .settings(
+                base: [
+                    "GENERATE_INFOPLIST_FILE": "YES",
+                    "PRODUCT_NAME": "dexoTests",
+                    "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+                    "SWIFT_VERSION": "5.0",
                 ]
             )
         ),

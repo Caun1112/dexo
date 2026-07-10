@@ -133,9 +133,10 @@ final class NotificationPoller {
             return
         }
 
-        // linux.do uses a separate MessageBus domain (ping.linux.do) that requires a shared session key.
+        // linux.do uses the dedicated ping.ldstatic.com MessageBus origin and
+        // requires a shared session key for cookie-based authentication.
         // Only needed for web-based login (cookie auth), not User API Key auth.
-        if api.baseURL.contains("linux.do"),
+        if api.isLinuxDo,
            KeychainHelper.getUserApiKey(for: api.baseURL) == AuthManager.webAuthSentinel
         {
             sharedSessionKey = await api.fetchSharedSessionKey()

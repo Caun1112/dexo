@@ -72,7 +72,7 @@ final class TopicComposerViewModel {
 
     func loadCategories() async {
         do {
-            let list = try await api.fetchCategories()
+            let list = try await api.fetchAllCategories()
             categories = list.categoryList.categories
         } catch {
             // Non-critical — user can retry

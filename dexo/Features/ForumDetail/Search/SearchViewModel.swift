@@ -60,8 +60,9 @@ final class SearchViewModel {
 
     func loadCategories() async {
         do {
-            let catList = try await api.fetchCategories()
+            let catList = try await api.fetchAllCategories()
             categories = catList.categoryList.categories
+            categoriesById.removeAll()
             for cat in categories {
                 categoriesById[cat.id] = cat
                 if let subs = cat.subcategoryList {
@@ -69,6 +70,9 @@ final class SearchViewModel {
                         categoriesById[sub.id] = sub
                     }
                 }
+            }
+            if let selectedCategoryId, categoriesById[selectedCategoryId] == nil {
+                self.selectedCategoryId = nil
             }
         } catch {}
     }

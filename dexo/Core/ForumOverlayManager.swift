@@ -28,6 +28,10 @@ final class ForumOverlayManager {
     // MARK: - Present
 
     func present(forum: ForumInstance, in window: UIWindow) {
+        // The forum-list screen offers the user an explicit HTTPS migration.
+        // Keep this lower-level entry point fail-closed for every other caller.
+        guard ForumURLPolicy.isSecure(forum.baseURL) else { return }
+
         // Clean up any existing instance
         dismissOverlayWindow()
         removeFloatingButton()

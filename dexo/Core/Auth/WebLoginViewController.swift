@@ -101,13 +101,13 @@ final class WebLoginViewController: BaseViewController {
 
     private func handleCookiesReady(_ cookies: [HTTPCookie]) {
         Task { @MainActor in
-            await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
-            if let ua = try? await webView.evaluateJavaScript("navigator.userAgent") as? String {
-                WebCookieStore.shared.userAgent = ua
-            }
-            let ua = WebCookieStore.shared.userAgent
+            // Do not mutate the app-wide cookie store here. AuthManager first
+            // persists the new auth marker, then installs these cookies. This
+            // preserves the previous login if Keychain persistence fails.
+            let evaluatedUserAgent = try? await webView.evaluateJavaScript("navigator.userAgent") as? String
+            let userAgent = evaluatedUserAgent ?? webView.customUserAgent
             dismiss(animated: true) {
-                self.onSuccess(cookies, ua)
+                self.onSuccess(cookies, userAgent)
             }
         }
     }
@@ -178,7 +178,7 @@ final class WebLoginViewController: BaseViewController {
         private(set) var didCallback = false
 
         init(targetURL: URL, onCookiesReady: @escaping ([HTTPCookie]) -> Void) {
-            self.targetHost = targetURL.host ?? ""
+            self.targetHost = targetURL.host?.lowercased() ?? ""
             self.onCookiesReady = onCookiesReady
         }
 
@@ -195,7 +195,9 @@ final class WebLoginViewController: BaseViewController {
             guard !didCallback else { return }
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                 guard let self, !self.didCallback else { return }
-                let relevant = cookies.filter { $0.domain.contains(self.targetHost) }
+                let relevant = cookies.filter {
+                    WebCookieStore.cookieDomain($0.domain, matchesHost: self.targetHost)
+                }
                 self.didCallback = true
                 DispatchQueue.main.async { self.onCookiesReady(relevant) }
             }

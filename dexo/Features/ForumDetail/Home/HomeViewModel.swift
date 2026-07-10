@@ -1,16 +1,24 @@
 import Foundation
 
-enum HomeListMode: String {
-    case latest
-    case hot
-    case top
+import Perception
+
+protocol HomeFeedAPIClient: AnyObject {
+    func fetchTopicFeed(mode: TopicFeedMode, page: Int) async throws -> DiscourseTopicList
+    func fetchCategoryTopics(
+        slug: String,
+        id: Int,
+        feedMode: TopicFeedMode?,
+        page: Int
+    ) async throws -> DiscourseTopicList
+    func fetchAllCategories(forceRefresh: Bool) async throws -> DiscourseCategoryList
+    func invalidateCategoryCache()
 }
 
-import Perception
+extension DiscourseAPI: HomeFeedAPIClient {}
 
 @Perceptible
 final class HomeViewModel {
-    var listMode: HomeListMode = .latest
+    private(set) var feedMode: TopicFeedMode = .activity
     var topics: [DiscourseTopicList.Topic] = []
     var isLoading = false
     var isLoadingMore = false
@@ -19,17 +27,18 @@ final class HomeViewModel {
     var requiresLogin = false
 
     var categories: [DiscourseCategory] = []
-    var selectedCategoryId: Int?
+    private(set) var selectedCategoryId: Int?
 
     /// O(1) topic lookup by ID for cell configuration.
     private(set) var topicsById: [Int: DiscourseTopicList.Topic] = [:]
 
-    private let api: DiscourseAPI
+    private let api: any HomeFeedAPIClient
     private var currentPage = 0
+    private var requestGeneration = 0
     private var usersById: [Int: DiscourseTopicList.User] = [:]
     private var categoriesById: [Int: DiscourseCategory] = [:]
 
-    init(api: DiscourseAPI) {
+    init(api: any HomeFeedAPIClient) {
         self.api = api
     }
 
@@ -48,58 +57,122 @@ final class HomeViewModel {
         return categoriesById[id]
     }
 
+    @discardableResult
+    func selectFeedMode(_ mode: TopicFeedMode) -> Bool {
+        guard feedMode != mode else { return false }
+        invalidateRequests()
+        clearTopicResults()
+        feedMode = mode
+        return true
+    }
+
+    @discardableResult
+    func selectCategory(_ categoryId: Int?) -> Bool {
+        guard selectedCategoryId != categoryId else { return false }
+        invalidateRequests()
+        clearTopicResults()
+        selectedCategoryId = categoryId
+        return true
+    }
+
     func loadTopics() async {
+        invalidateRequests()
+        let generation = requestGeneration
+        let requestedMode = feedMode
+        let requestedCategoryId = selectedCategoryId
+        let requestedCategory = selectedCategory()
+
         isLoading = true
         errorMessage = nil
         requiresLogin = false
-        currentPage = 0
+        defer {
+            if isCurrentRequest(
+                generation: generation,
+                mode: requestedMode,
+                categoryId: requestedCategoryId
+            ) {
+                isLoading = false
+            }
+        }
+
         do {
-            async let categoriesResult: Void = loadCategoriesIfNeeded()
+            async let categoriesResult: Void = loadCategoriesIfNeeded(generation: generation)
             let result: DiscourseTopicList
-            if let cat = selectedCategory() {
-                result = try await api.fetchCategoryTopics(slug: cat.slug, id: cat.id, sort: listMode.rawValue, page: 0)
+            if let requestedCategory {
+                result = try await api.fetchCategoryTopics(
+                    slug: requestedCategory.slug,
+                    id: requestedCategory.id,
+                    feedMode: requestedMode,
+                    page: 0
+                )
             } else {
-                switch listMode {
-                case .latest:
-                    result = try await api.fetchLatestTopics(page: 0)
-                case .hot:
-                    result = try await api.fetchHotTopics(page: 0)
-                case .top:
-                    result = try await api.fetchTopTopics(page: 0)
-                }
+                result = try await api.fetchTopicFeed(mode: requestedMode, page: 0)
             }
             _ = await categoriesResult
+
+            guard isCurrentRequest(
+                generation: generation,
+                mode: requestedMode,
+                categoryId: requestedCategoryId
+            ) else { return }
+
             topics = result.topicList.topics
             topicsById = Dictionary(topics.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
             canLoadMore = result.topicList.moreTopicsUrl != nil
             indexUsers(result.users)
         } catch {
+            guard isCurrentRequest(
+                generation: generation,
+                mode: requestedMode,
+                categoryId: requestedCategoryId
+            ) else { return }
+
             if let apiError = error as? DiscourseAPIError, apiError.isNotLoggedIn || apiError.isForbidden {
                 requiresLogin = true
             }
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func loadMoreTopics() async {
-        guard canLoadMore, !isLoadingMore else { return }
-        isLoadingMore = true
+        guard canLoadMore, !isLoading, !isLoadingMore else { return }
+
+        let generation = requestGeneration
+        let requestedMode = feedMode
+        let requestedCategoryId = selectedCategoryId
+        let requestedCategory = selectedCategory()
         let nextPage = currentPage + 1
+
+        isLoadingMore = true
+        defer {
+            if isCurrentRequest(
+                generation: generation,
+                mode: requestedMode,
+                categoryId: requestedCategoryId
+            ) {
+                isLoadingMore = false
+            }
+        }
+
         do {
             let result: DiscourseTopicList
-            if let cat = selectedCategory() {
-                result = try await api.fetchCategoryTopics(slug: cat.slug, id: cat.id, sort: listMode.rawValue, page: nextPage)
+            if let requestedCategory {
+                result = try await api.fetchCategoryTopics(
+                    slug: requestedCategory.slug,
+                    id: requestedCategory.id,
+                    feedMode: requestedMode,
+                    page: nextPage
+                )
             } else {
-                switch listMode {
-                case .latest:
-                    result = try await api.fetchLatestTopics(page: nextPage)
-                case .hot:
-                    result = try await api.fetchHotTopics(page: nextPage)
-                case .top:
-                    result = try await api.fetchTopTopics(page: nextPage)
-                }
+                result = try await api.fetchTopicFeed(mode: requestedMode, page: nextPage)
             }
+
+            guard isCurrentRequest(
+                generation: generation,
+                mode: requestedMode,
+                categoryId: requestedCategoryId
+            ) else { return }
+
             currentPage = nextPage
             let existingIds = Set(topics.map(\.id))
             let newTopics = result.topicList.topics.filter { !existingIds.contains($0.id) }
@@ -110,7 +183,6 @@ final class HomeViewModel {
         } catch {
             // Silently fail on load-more; user can scroll again to retry
         }
-        isLoadingMore = false
     }
 
     private func indexUsers(_ users: [DiscourseTopicList.User]?) {
@@ -121,15 +193,34 @@ final class HomeViewModel {
     }
 
     func reloadCategories() async {
+        api.invalidateCategoryCache()
         categoriesById.removeAll()
         categories.removeAll()
-        await loadCategoriesIfNeeded()
+        await loadCategoriesIfNeeded(generation: requestGeneration)
     }
 
-    private func loadCategoriesIfNeeded() async {
+    /// Resets every piece of state derived from the previous credential before
+    /// loading the forum again. In particular, an anonymous category/topic
+    /// response must never survive a successful login.
+    func reloadAfterAuthChange() async {
+        invalidateRequests()
+        api.invalidateCategoryCache()
+        topics.removeAll()
+        topicsById.removeAll()
+        usersById.removeAll()
+        categories.removeAll()
+        categoriesById.removeAll()
+        selectedCategoryId = nil
+        errorMessage = nil
+        requiresLogin = false
+        await loadTopics()
+    }
+
+    private func loadCategoriesIfNeeded(generation: Int) async {
         guard categoriesById.isEmpty else { return }
         do {
-            let list = try await api.fetchCategories()
+            let list = try await api.fetchAllCategories(forceRefresh: false)
+            guard generation == requestGeneration else { return }
             categories = list.categoryList.categories
             indexCategories(list.categoryList.categories)
         } catch {
@@ -144,5 +235,31 @@ final class HomeViewModel {
                 indexCategories(subs)
             }
         }
+    }
+
+    private func invalidateRequests() {
+        requestGeneration &+= 1
+        currentPage = 0
+        canLoadMore = false
+        isLoading = false
+        isLoadingMore = false
+    }
+
+    private func clearTopicResults() {
+        topics.removeAll()
+        topicsById.removeAll()
+        usersById.removeAll()
+        errorMessage = nil
+        requiresLogin = false
+    }
+
+    private func isCurrentRequest(
+        generation: Int,
+        mode: TopicFeedMode,
+        categoryId: Int?
+    ) -> Bool {
+        generation == requestGeneration
+            && mode == feedMode
+            && categoryId == selectedCategoryId
     }
 }

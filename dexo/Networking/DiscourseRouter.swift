@@ -18,11 +18,10 @@ enum PrivateMessageFilter {
 }
 
 enum DiscourseRouter {
-    case latestTopics(page: Int)
-    case hotTopics(page: Int)
-    case topTopics(page: Int)
+    case topicFeed(mode: TopicFeedMode, page: Int)
     case readTopics(page: Int)
-    case categories
+    case categories(page: Int)
+    case categoryChildren(parentCategoryID: Int, page: Int)
     case topic(id: Int, nearPostNumber: Int? = nil, filter: String? = nil)
     case topicPosts(topicId: Int, postIds: [Int])
     /// `GET /n/{slug}/{id}.json` — Discourse's nested-replies view. Each call
@@ -43,7 +42,7 @@ enum DiscourseRouter {
     case createTopic
     case createBoost(postId: Int)
     case postReplies(postId: Int)
-    case categoryTopics(slug: String, id: Int, sort: String?, page: Int)
+    case categoryTopics(slug: String, id: Int, feedMode: TopicFeedMode?, page: Int)
     case tagTopics(name: String, page: Int)
     case siteInfo
     case basicInfo
@@ -87,16 +86,18 @@ enum DiscourseRouter {
 
     var path: String {
         switch self {
-        case .latestTopics(let page):
-            return "/latest.json?page=\(page)"
-        case .hotTopics(let page):
-            return "/hot.json?page=\(page)"
-        case .topTopics(let page):
-            return "/top.json?page=\(page)"
+        case .topicFeed(let mode, let page):
+            var path = "/\(mode.listPathComponent).json?page=\(page)"
+            if let order = mode.orderQueryValue {
+                path += "&order=\(order)"
+            }
+            return path
         case .readTopics(let page):
             return "/read.json?page=\(page)"
-        case .categories:
-            return "/categories.json?include_subcategories=true"
+        case .categories(let page):
+            return "/categories.json?include_subcategories=true&page=\(page)"
+        case .categoryChildren(let parentCategoryID, let page):
+            return "/categories.json?include_subcategories=true&parent_category_id=\(parentCategoryID)&page=\(page)"
         case .topic(let id, let nearPostNumber, let filter):
             // `/t/{id}/{N}.json` returns a batch of posts ending at floor N — used
             // for deep-link entry (notification tap, reply jump) so we avoid
@@ -152,11 +153,15 @@ enum DiscourseRouter {
             return "/discourse-boosts/posts/\(postId)/boosts"
         case .postReplies(let postId):
             return "/posts/\(postId)/replies.json"
-        case .categoryTopics(let slug, let id, let sort, let page):
-            if let sort, !sort.isEmpty {
-                return "/c/\(slug)/\(id)/l/\(sort).json?page=\(page)"
+        case .categoryTopics(let slug, let id, let feedMode, let page):
+            guard let feedMode else {
+                return "/c/\(slug)/\(id).json?page=\(page)"
             }
-            return "/c/\(slug)/\(id).json?page=\(page)"
+            var path = "/c/\(slug)/\(id)/l/\(feedMode.listPathComponent).json?page=\(page)"
+            if let order = feedMode.orderQueryValue {
+                path += "&order=\(order)"
+            }
+            return path
         case .tagTopics(let name, let page):
             return "/tag/\(name).json?page=\(page)"
         case .siteInfo:

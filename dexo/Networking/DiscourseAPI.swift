@@ -1,24 +1,190 @@
 import Alamofire
 import Foundation
 
+/// Normalizes both shapes returned by Discourse's category list endpoint:
+/// nested `subcategory_list` responses and lazy-load responses where roots and
+/// a small child preview are mixed in one flat array. Root order always follows
+/// the server's paginated order.
+struct CategoryPageAccumulator {
+    private var categoriesByID: [Int: DiscourseCategory] = [:]
+    private var rootCategoryIDs: [Int] = []
+    private var seenRootCategoryIDs = Set<Int>()
+    private var childCategoryIDsByParent: [Int: [Int]] = [:]
+    private var expectedChildCategoryIDsByParent: [Int: Set<Int>] = [:]
+    private var categoryDiscoveryOrder: [Int] = []
+    private var startedChildFetches = Set<Int>()
+    private var completedChildFetches = Set<Int>()
+
+    var categories: [DiscourseCategory] {
+        rootCategoryIDs.compactMap { materializeCategory(id: $0, ancestors: []) }
+    }
+
+    /// Appends one top-level `/categories.json?page=N` response. The return
+    /// value follows the public contract: continue while the page contributes
+    /// any previously unseen category ID, whether root or lazy child preview.
+    mutating func append(_ page: [DiscourseCategory]) -> Bool {
+        let previousCategoryCount = categoriesByID.count
+        for category in page {
+            register(category)
+        }
+
+        for category in page where category.parentCategoryId == nil {
+            guard seenRootCategoryIDs.insert(category.id).inserted else { continue }
+            rootCategoryIDs.append(category.id)
+        }
+        return categoriesByID.count > previousCategoryCount
+    }
+
+    /// Appends a page requested with `parent_category_id`. Only direct
+    /// children are accepted, which also makes a misbehaving server that
+    /// ignores this parameter terminate safely.
+    mutating func appendChildren(_ page: [DiscourseCategory], parentCategoryID: Int) -> Bool {
+        let directChildren = page.filter { $0.parentCategoryId == parentCategoryID }
+        guard !directChildren.isEmpty else { return false }
+
+        // The root response's child preview is not guaranteed to use the same
+        // order as the parent-scoped list. On its first page, replace that
+        // preview order, then append subsequent pages in server order.
+        if startedChildFetches.insert(parentCategoryID).inserted {
+            childCategoryIDsByParent[parentCategoryID] = []
+        }
+        let previousIDs = Set(childCategoryIDsByParent[parentCategoryID] ?? [])
+        for category in directChildren {
+            register(category)
+        }
+        return Set(childCategoryIDsByParent[parentCategoryID] ?? []) != previousIDs
+    }
+
+    /// The next category whose `subcategory_ids` promises children that have
+    /// not yet arrived as objects. Newly fetched children can themselves add
+    /// work here, so this also covers installations allowing deeper nesting.
+    var nextParentCategoryIDNeedingFetch: Int? {
+        categoryDiscoveryOrder.first { categoryID in
+            guard !completedChildFetches.contains(categoryID),
+                  let expectedIDs = expectedChildCategoryIDsByParent[categoryID],
+                  !expectedIDs.isEmpty
+            else { return false }
+
+            let receivedIDs = Set(childCategoryIDsByParent[categoryID] ?? [])
+            return !expectedIDs.isSubset(of: receivedIDs)
+        }
+    }
+
+    func hasAllExpectedChildren(for parentCategoryID: Int) -> Bool {
+        guard let expectedIDs = expectedChildCategoryIDsByParent[parentCategoryID] else {
+            return true
+        }
+        return expectedIDs.isSubset(of: Set(childCategoryIDsByParent[parentCategoryID] ?? []))
+    }
+
+    mutating func markChildFetchCompleted(for parentCategoryID: Int) {
+        completedChildFetches.insert(parentCategoryID)
+    }
+
+    private mutating func register(_ category: DiscourseCategory) {
+        if categoriesByID[category.id] == nil {
+            categoriesByID[category.id] = category
+            categoryDiscoveryOrder.append(category.id)
+        }
+
+        if let subcategoryIDs = category.subcategoryIds {
+            expectedChildCategoryIDsByParent[category.id, default: []]
+                .formUnion(subcategoryIDs)
+        }
+
+        if let parentCategoryID = category.parentCategoryId {
+            appendChildID(category.id, to: parentCategoryID)
+        }
+
+        for child in category.subcategoryList ?? [] {
+            register(child)
+            appendChildID(child.id, to: category.id)
+        }
+    }
+
+    private mutating func appendChildID(_ childID: Int, to parentCategoryID: Int) {
+        var childIDs = childCategoryIDsByParent[parentCategoryID, default: []]
+        guard !childIDs.contains(childID) else { return }
+        childIDs.append(childID)
+        childCategoryIDsByParent[parentCategoryID] = childIDs
+    }
+
+    private func materializeCategory(
+        id: Int,
+        ancestors: Set<Int>
+    ) -> DiscourseCategory? {
+        guard let category = categoriesByID[id], !ancestors.contains(id) else { return nil }
+
+        var nextAncestors = ancestors
+        nextAncestors.insert(id)
+        let childIDs = childCategoryIDsByParent[id] ?? []
+        let children = childIDs.compactMap {
+            materializeCategory(id: $0, ancestors: nextAncestors)
+        }
+        let hasServerChildShape = category.subcategoryIds != nil || category.subcategoryList != nil
+        return category.replacingSubcategoryList(
+            hasServerChildShape || !children.isEmpty ? children : nil
+        )
+    }
+}
+
 final class DiscourseAPI {
+    typealias CategoryPageLoader = (Int) async throws -> DiscourseCategoryList
+    typealias CategoryChildrenLoader = (Int, Int) async throws -> DiscourseCategoryList
+
     let baseURL: String
     let assetBaseURL: String
     private(set) var emojiReady: Bool = false
     private let interceptor: DiscourseAuthInterceptor
+    private var cachedCategoryList: DiscourseCategoryList?
+    private var categoryFetchTask: Task<DiscourseCategoryList, Error>?
+    private var categoryCacheGeneration = 0
+    private nonisolated(unsafe) var categoryAuthChangeObserver: (any NSObjectProtocol)?
+    private let categoryPageLoader: CategoryPageLoader?
+    private let categoryChildrenLoader: CategoryChildrenLoader?
 
-    private lazy var session: Session = DiscourseAPI.makeSession(interceptor: interceptor)
+    private lazy var session: Session = DiscourseAPI.makeSession(
+        interceptor: interceptor,
+        baseURL: baseURL
+    )
 
     init(forum: ForumInstance) {
         self.baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.assetBaseURL = forum.assetBaseURL
         self.interceptor = DiscourseAuthInterceptor(baseURL: baseURL)
+        self.categoryPageLoader = nil
+        self.categoryChildrenLoader = nil
+        observeAuthenticationChanges()
     }
 
     init(baseURL: String) {
         self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.assetBaseURL = self.baseURL
         self.interceptor = DiscourseAuthInterceptor(baseURL: self.baseURL)
+        self.categoryPageLoader = nil
+        self.categoryChildrenLoader = nil
+        observeAuthenticationChanges()
+    }
+
+    /// Test seam for category pagination/cache behavior. Production callers
+    /// use the normal initializers above and therefore always hit the network.
+    init(
+        testingBaseURL baseURL: String,
+        categoryPageLoader: @escaping CategoryPageLoader,
+        categoryChildrenLoader: CategoryChildrenLoader? = nil
+    ) {
+        self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        self.assetBaseURL = self.baseURL
+        self.interceptor = DiscourseAuthInterceptor(baseURL: self.baseURL)
+        self.categoryPageLoader = categoryPageLoader
+        self.categoryChildrenLoader = categoryChildrenLoader
+        observeAuthenticationChanges()
+    }
+
+    deinit {
+        if let categoryAuthChangeObserver {
+            NotificationCenter.default.removeObserver(categoryAuthChangeObserver)
+        }
     }
 
     /// linux.do's `/session/current.json` returns an empty body, so callers must skip it
@@ -27,37 +193,122 @@ final class DiscourseAPI {
         URL(string: baseURL)?.host?.lowercased() == "linux.do"
     }
 
-    private static func makeSession(interceptor: DiscourseAuthInterceptor) -> Session {
+    private static func makeSession(interceptor: DiscourseAuthInterceptor, baseURL: String) -> Session {
         let config = URLSessionConfiguration.af.default
         config.httpCookieAcceptPolicy = .never
         config.httpShouldSetCookies = false
-        return Session(configuration: config, interceptor: interceptor)
+        return Session(
+            configuration: config,
+            interceptor: interceptor,
+            redirectHandler: ForumRedirectHandler(baseURL: baseURL)
+        )
     }
 
     // MARK: - Public API
 
-    func fetchLatestTopics(page: Int = 0) async throws -> DiscourseTopicList {
-        try await request(route: .latestTopics(page: page))
-    }
-
-    func fetchHotTopics(page: Int = 0) async throws -> DiscourseTopicList {
-        try await request(route: .hotTopics(page: page))
-    }
-
-    func fetchTopTopics(page: Int = 0) async throws -> DiscourseTopicList {
-        try await request(route: .topTopics(page: page))
+    func fetchTopicFeed(mode: TopicFeedMode, page: Int = 0) async throws -> DiscourseTopicList {
+        try await request(route: .topicFeed(mode: mode, page: page))
     }
 
     func fetchReadTopics(page: Int = 0) async throws -> DiscourseTopicList {
         try await request(route: .readTopics(page: page))
     }
 
-    func fetchCategories() async throws -> DiscourseCategoryList {
-        try await request(route: .categories)
+    func fetchCategories(page: Int) async throws -> DiscourseCategoryList {
+        if let categoryPageLoader {
+            return try await categoryPageLoader(page)
+        }
+        return try await request(route: .categories(page: page))
     }
 
-    func fetchCategoryTopics(slug: String, id: Int, sort: String? = nil, page: Int = 0) async throws -> DiscourseTopicList {
-        try await request(route: .categoryTopics(slug: slug, id: id, sort: sort, page: page))
+    private func fetchChildCategories(
+        parentCategoryID: Int,
+        page: Int
+    ) async throws -> DiscourseCategoryList {
+        if let categoryChildrenLoader {
+            return try await categoryChildrenLoader(parentCategoryID, page)
+        }
+        return try await request(
+            route: .categoryChildren(parentCategoryID: parentCategoryID, page: page)
+        )
+    }
+
+    /// Fetches every category page and caches the merged result for all feature
+    /// screens sharing this API instance. Discourse can lazy-load root
+    /// categories for authenticated users, so a single `/categories.json`
+    /// response is not necessarily complete.
+    func fetchAllCategories(forceRefresh: Bool = false) async throws -> DiscourseCategoryList {
+        if forceRefresh {
+            invalidateCategoryCache()
+        }
+
+        if let cachedCategoryList {
+            return cachedCategoryList
+        }
+        let generation = categoryCacheGeneration
+        if let categoryFetchTask {
+            let result = try await categoryFetchTask.value
+            guard generation == categoryCacheGeneration else {
+                throw CancellationError()
+            }
+            return result
+        }
+
+        let task = Task { [weak self] () throws -> DiscourseCategoryList in
+            guard let self else { throw CancellationError() }
+            return try await self.fetchAllCategoriesFromServer()
+        }
+        categoryFetchTask = task
+
+        do {
+            let result = try await task.value
+            guard generation == categoryCacheGeneration else {
+                throw CancellationError()
+            }
+            cachedCategoryList = result
+            categoryFetchTask = nil
+            return result
+        } catch {
+            if generation == categoryCacheGeneration {
+                categoryFetchTask = nil
+            }
+            throw error
+        }
+    }
+
+    /// Invalidates both the cached result and any anonymous/authenticated fetch
+    /// still in flight. The generation check prevents a stale request from
+    /// repopulating the cache after an authentication change.
+    func invalidateCategoryCache() {
+        categoryCacheGeneration += 1
+        cachedCategoryList = nil
+        categoryFetchTask?.cancel()
+        categoryFetchTask = nil
+    }
+
+    private func observeAuthenticationChanges() {
+        let observedBaseURL = baseURL
+        categoryAuthChangeObserver = NotificationCenter.default.addObserver(
+            forName: .discourseAuthDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self, observedBaseURL] notification in
+            guard notification.userInfo?["baseURL"] as? String == observedBaseURL else {
+                return
+            }
+            MainActor.assumeIsolated {
+                self?.invalidateCategoryCache()
+            }
+        }
+    }
+
+    func fetchCategoryTopics(
+        slug: String,
+        id: Int,
+        feedMode: TopicFeedMode? = nil,
+        page: Int = 0
+    ) async throws -> DiscourseTopicList {
+        try await request(route: .categoryTopics(slug: slug, id: id, feedMode: feedMode, page: page))
     }
 
     func fetchTagTopics(name: String, page: Int = 0) async throws -> DiscourseTopicList {
@@ -445,7 +696,7 @@ final class DiscourseAPI {
 
     func pollMessageBus(clientId: String, channels: [String: Int], sharedSessionKey: String? = nil) async throws -> [MessageBusMessage] {
         let route = DiscourseRouter.messageBusPoll(clientId: clientId)
-        let mbBase = baseURL.contains("linux.do") ? "https://ping.ldstatic.com" : baseURL
+        let mbBase = isLinuxDo ? "https://ping.ldstatic.com" : baseURL
         let url = mbBase + route.path
         debugLog("[MessageBus] POST \(url) channels=\(channels)")
         var headers = HTTPHeaders()
@@ -518,6 +769,52 @@ final class DiscourseAPI {
     }
 
     // MARK: - Private
+
+    private func fetchAllCategoriesFromServer() async throws -> DiscourseCategoryList {
+        var accumulator = CategoryPageAccumulator()
+        var page = 1
+
+        while true {
+            try Task.checkCancellation()
+            let response = try await fetchCategories(page: page)
+            try Task.checkCancellation()
+            let pageCategories = response.categoryList.categories
+            guard !pageCategories.isEmpty else { break }
+            guard accumulator.append(pageCategories) else { break }
+            page += 1
+        }
+
+        // When category lazy loading is enabled, each root page embeds at most
+        // five child objects but exposes every visible child ID through
+        // `subcategory_ids`. Fetch the missing direct children through the
+        // same upstream endpoint scoped by `parent_category_id`. Any children
+        // with their own missing descendants are discovered by the accumulator
+        // and processed in a later iteration.
+        while let parentCategoryID = accumulator.nextParentCategoryIDNeedingFetch {
+            var childPage = 1
+
+            while true {
+                try Task.checkCancellation()
+                let response = try await fetchChildCategories(
+                    parentCategoryID: parentCategoryID,
+                    page: childPage
+                )
+                try Task.checkCancellation()
+                let pageCategories = response.categoryList.categories
+                guard !pageCategories.isEmpty else { break }
+                guard accumulator.appendChildren(
+                    pageCategories,
+                    parentCategoryID: parentCategoryID
+                ) else { break }
+                guard !accumulator.hasAllExpectedChildren(for: parentCategoryID) else { break }
+                childPage += 1
+            }
+
+            accumulator.markChildFetchCompleted(for: parentCategoryID)
+        }
+
+        return DiscourseCategoryList(categoryList: .init(categories: accumulator.categories))
+    }
 
     private func request<T: Decodable>(route: DiscourseRouter, parameters: Parameters? = nil, encoding: ParameterEncoding? = nil, headers: HTTPHeaders? = nil) async throws -> T {
         let url = baseURL + route.path
@@ -656,6 +953,16 @@ private final class DiscourseAuthInterceptor: RequestInterceptor {
     }
 
     func adapt(_ urlRequest: URLRequest, for session: Session, completion: @escaping (Result<URLRequest, Error>) -> Void) {
+        // Keep the transport policy at the final networking boundary as well
+        // as in the forum-list UI. This prevents legacy HTTP records (or a
+        // future non-UI caller) from ever attaching credentials to a request.
+        guard let requestURL = urlRequest.url,
+              ForumURLPolicy.allowsRequest(requestURL, for: baseURL)
+        else {
+            completion(.failure(URLError(.appTransportSecurityRequiresSecureConnection)))
+            return
+        }
+
         var request = urlRequest
         if let userApiKey = KeychainHelper.getUserApiKey(for: baseURL) {
             if userApiKey == AuthManager.webAuthSentinel {
@@ -685,7 +992,12 @@ private final class DiscourseAuthInterceptor: RequestInterceptor {
                     return
                 }
             } else {
-                request.setValue(userApiKey, forHTTPHeaderField: "User-Api-Key")
+                // Some maintenance calls intentionally carry a captured old
+                // key (for example revoking it after an atomic credential
+                // switch). Never overwrite an explicit credential snapshot.
+                if request.value(forHTTPHeaderField: "User-Api-Key") == nil {
+                    request.setValue(userApiKey, forHTTPHeaderField: "User-Api-Key")
+                }
             }
         }
         if request.value(forHTTPHeaderField: "Accept") == nil {
@@ -790,5 +1102,31 @@ private final class DiscourseAuthInterceptor: RequestInterceptor {
             }
             completion(token)
         }
+    }
+}
+
+/// Reject redirects outside the forum origin before URLSession can forward
+/// custom authentication headers. The exact linux.do MessageBus host remains
+/// on the same allowlist as initial requests.
+private final class ForumRedirectHandler: RedirectHandler {
+    private let baseURL: String
+
+    init(baseURL: String) {
+        self.baseURL = baseURL
+    }
+
+    func task(
+        _ task: URLSessionTask,
+        willBeRedirectedTo request: URLRequest,
+        for response: HTTPURLResponse,
+        completion: @escaping (URLRequest?) -> Void
+    ) {
+        guard let targetURL = request.url,
+              ForumURLPolicy.allowsRequest(targetURL, for: baseURL)
+        else {
+            completion(nil)
+            return
+        }
+        completion(request)
     }
 }

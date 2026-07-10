@@ -22,7 +22,12 @@ final class ForumListViewModel {
     func deleteForum(at index: Int) {
         guard index < forums.count else { return }
         let forum = forums[index]
-        AuthManager.shared.logout(forum: forum)
+        if ForumURLPolicy.isSecure(forum.baseURL) {
+            AuthManager.shared.logout(forum: forum)
+        } else {
+            // Never attempt server-side revocation for a blocked legacy URL.
+            AuthManager.shared.clearLocalAuthentication(for: forum.baseURL)
+        }
         do {
             try DatabaseManager.shared.deleteForum(forum)
             forums.remove(at: index)
@@ -45,5 +50,97 @@ final class ForumListViewModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Probes the HTTPS equivalent anonymously, then migrates the saved forum
+    /// and removes credentials associated with the legacy HTTP address.
+    func upgradeForumToHTTPS(_ forum: ForumInstance) async throws -> ForumInstance {
+        let candidate = try ForumURLPolicy.httpsUpgradeCandidate(from: forum.baseURL)
+        let info = try await fetchBasicInfoAnonymously(baseURL: candidate)
+
+        var updated = forum
+        updated.baseURL = candidate
+        if !info.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            updated.title = info.title
+        }
+        updated.iconURL = secureIconURL(baseURL: candidate, info: info)
+        updated.apiKey = nil
+        updated.apiUsername = nil
+        updated.username = nil
+
+        try DatabaseManager.shared.saveForum(&updated)
+        // Credential keys are URL-based. Clear both the legacy address and
+        // the HTTPS candidate so an unrelated/stale candidate credential can
+        // never make the migrated record appear logged in automatically.
+        AuthManager.shared.clearLocalAuthentication(for: candidate)
+        AuthManager.shared.clearLocalAuthentication(for: forum.baseURL)
+
+        if let index = forums.firstIndex(where: { $0.id == forum.id }) {
+            forums[index] = updated
+        }
+        return updated
+    }
+
+    private func fetchBasicInfoAnonymously(baseURL: String) async throws -> DiscourseBasicInfo {
+        guard let url = URL(string: baseURL + "/site/basic-info.json") else {
+            throw URLError(.badURL)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 30
+
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200 ..< 300).contains(httpResponse.statusCode),
+              let responseURL = httpResponse.url,
+              Self.hasSameHTTPSOrigin(responseURL, as: url)
+        else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(DiscourseBasicInfo.self, from: data)
+    }
+
+    /// Anonymous upgrade probes may follow same-origin redirects (for example
+    /// to add a trailing slash), but must not silently turn a saved forum into
+    /// a cross-origin redirector that later receives authenticated requests.
+    private static func hasSameHTTPSOrigin(_ lhs: URL, as rhs: URL) -> Bool {
+        guard lhs.scheme?.lowercased() == "https",
+              rhs.scheme?.lowercased() == "https",
+              lhs.host?.lowercased() == rhs.host?.lowercased()
+        else { return false }
+
+        return (lhs.port ?? 443) == (rhs.port ?? 443)
+    }
+
+    private func secureIconURL(baseURL: String, info: DiscourseBasicInfo) -> String? {
+        guard let path = info.appleTouchIconURL ?? info.logoURL ?? info.faviconURL else {
+            return nil
+        }
+
+        let value: String
+        if path.hasPrefix("//") {
+            value = "https:" + path
+        } else if let url = URL(string: path), url.scheme != nil {
+            value = url.absoluteString
+        } else {
+            value = path.hasPrefix("/") ? baseURL + path : baseURL + "/" + path
+        }
+
+        guard let url = URL(string: value), url.scheme?.lowercased() == "https" else {
+            return nil
+        }
+        return url.absoluteString
     }
 }

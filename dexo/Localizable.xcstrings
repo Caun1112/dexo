@@ -1,23 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Tap to reveal spoiler" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tap to reveal spoiler"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "点击查看被隐藏的内容"
-          }
-        }
-      }
-    },
     "action.cancel" : {
       "localizations" : {
         "en" : {
@@ -131,7 +114,6 @@
       }
     },
     "action.open" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -195,6 +177,22 @@
         }
       }
     },
+    "add_forum.error.https_required" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only HTTPS forum addresses are supported."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅支持 HTTPS 论坛地址。"
+          }
+        }
+      }
+    },
     "add_forum.error.invalid_url" : {
       "localizations" : {
         "en" : {
@@ -223,6 +221,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加论坛"
+          }
+        }
+      }
+    },
+    "add_forum.url_placeholder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https://forum.example.com"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https://forum.example.com"
           }
         }
       }
@@ -534,7 +548,9 @@
         }
       }
     },
-    "cache.image_count %lld" : {},
+    "cache.image_count %lld" : {
+
+    },
     "cache.image_count %llu" : {
       "localizations" : {
         "en" : {
@@ -1272,6 +1288,134 @@
         }
       }
     },
+    "forum.https_upgrade.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try HTTPS"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尝试 HTTPS"
+          }
+        }
+      }
+    },
+    "forum.https_upgrade.checking" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking HTTPS…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查 HTTPS…"
+          }
+        }
+      }
+    },
+    "forum.https_upgrade.failure.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The HTTPS address could not be verified. The saved HTTP forum remains disabled and was not changed."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法验证 HTTPS 地址。已保存的 HTTP 论坛仍保持禁用，且未被修改。"
+          }
+        }
+      }
+    },
+    "forum.https_upgrade.failure.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTPS Upgrade Failed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTPS 升级失败"
+          }
+        }
+      }
+    },
+    "forum.https_upgrade.message %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This saved forum uses insecure HTTP and is disabled. Dexo can anonymously check %@ instead. If the upgrade succeeds, saved login data will be removed and you will need to sign in again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此论坛使用不安全的 HTTP，现已禁用。Dexo 可以匿名检查 %@。升级成功后会移除已保存的登录数据，你需要重新登录。"
+          }
+        }
+      }
+    },
+    "forum.https_upgrade.success.message %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The forum now uses %@. Saved login data was removed; sign in again to access your account."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "论坛现已使用 %@。已保存的登录数据已移除，请重新登录以访问你的账户。"
+          }
+        }
+      }
+    },
+    "forum.https_upgrade.success.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTPS Upgrade Complete"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTPS 升级完成"
+          }
+        }
+      }
+    },
+    "forum.https_upgrade.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upgrade Forum to HTTPS"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将论坛升级到 HTTPS"
+          }
+        }
+      }
+    },
     "forum.minimize.accessibility.hint" : {
       "localizations" : {
         "en" : {
@@ -1316,6 +1460,70 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "关闭"
+          }
+        }
+      }
+    },
+    "forum.security.blocked.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This saved forum address does not meet Dexo’s HTTPS security requirements. Delete this entry and add a valid HTTPS address to continue."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此论坛地址不符合 Dexo 的 HTTPS 安全要求。请删除该条目并添加有效的 HTTPS 地址后继续。"
+          }
+        }
+      }
+    },
+    "forum.security.blocked.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forum Disabled"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "论坛已禁用"
+          }
+        }
+      }
+    },
+    "home.activity" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent Activity"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近活跃"
+          }
+        }
+      }
+    },
+    "home.created" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Newest Topics"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新发布"
           }
         }
       }
@@ -1385,6 +1593,7 @@
       }
     },
     "home.latest" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1508,6 +1717,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已保存到相册"
+          }
+        }
+      }
+    },
+    "login.failed.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please try again. The new login was not saved."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请重试，新的登录状态未被保存。"
+          }
+        }
+      }
+    },
+    "login.failed.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Login Failed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录失败"
           }
         }
       }
@@ -2975,22 +3216,6 @@
         }
       }
     },
-    "settings.auto_open_last_forum" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Auto-open Last Forum"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "启动时打开上次论坛"
-          }
-        }
-      }
-    },
     "settings.app_icon" : {
       "localizations" : {
         "en" : {
@@ -3003,6 +3228,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "App 图标"
+          }
+        }
+      }
+    },
+    "settings.auto_open_last_forum" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-open Last Forum"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动时打开上次论坛"
           }
         }
       }
@@ -3411,6 +3652,23 @@
         }
       }
     },
+    "Tap to reveal spoiler" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to reveal spoiler"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点击查看被隐藏的内容"
+          }
+        }
+      }
+    },
     "theme.action.delete" : {
       "localizations" : {
         "en" : {
@@ -3763,119 +4021,6 @@
         }
       }
     },
-    "topic.bottombar.jump_to_floor" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Jump to floor"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "跳转楼层"
-          }
-        }
-      }
-    },
-    "topic.bottombar.op_only" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Original poster only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅看楼主"
-          }
-        }
-      }
-    },
-    "topic.bottombar.reverse_order" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reverse order"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒序查看"
-          }
-        }
-      }
-    },
-    "topic.bottombar.scroll_to_top" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scroll to top"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "回到顶部"
-          }
-        }
-      }
-    },
-    "topic.bottombar.summary_view" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "By heat"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按热度查看"
-          }
-        }
-      }
-    },
-    "topic.cell.a11y.pinned %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pinned: %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "置顶:%@"
-          }
-        }
-      }
-    },
-    "topic.cell.a11y.replies %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld replies"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 条回复"
-          }
-        }
-      }
-    },
     "topic_detail.bar.jump_to_floor" : {
       "localizations" : {
         "en" : {
@@ -4192,6 +4337,167 @@
         }
       }
     },
+    "topic.bottombar.jump_to_floor" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jump to floor"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳转楼层"
+          }
+        }
+      }
+    },
+    "topic.bottombar.op_only" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original poster only"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅看楼主"
+          }
+        }
+      }
+    },
+    "topic.bottombar.reverse_order" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reverse order"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒序查看"
+          }
+        }
+      }
+    },
+    "topic.bottombar.scroll_to_top" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scroll to top"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到顶部"
+          }
+        }
+      }
+    },
+    "topic.bottombar.summary_view" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By heat"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按热度查看"
+          }
+        }
+      }
+    },
+    "topic.cell.a11y.activity %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活跃于 %@"
+          }
+        }
+      }
+    },
+    "topic.cell.a11y.created %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Created %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发布于 %@"
+          }
+        }
+      }
+    },
+    "topic.cell.a11y.pinned %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pinned: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "置顶:%@"
+          }
+        }
+      }
+    },
+    "topic.cell.a11y.replies %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld replies"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条回复"
+          }
+        }
+      }
+    },
+    "topic.cell.a11y.tags %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tags: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签：%@"
+          }
+        }
+      }
+    },
     "user.follow" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4227,6 +4533,7 @@
       }
     },
     "user.message_body" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4259,6 +4566,7 @@
       }
     },
     "user.message_subject" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4275,6 +4583,7 @@
       }
     },
     "user.message_to %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4307,6 +4616,7 @@
       }
     },
     "user.send" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4323,6 +4633,7 @@
       }
     },
     "user.send_message" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

@@ -15,13 +15,13 @@ final class AddForumViewModel {
             return false
         }
 
-        var normalized = trimmed
-        if !normalized.hasPrefix("http://") && !normalized.hasPrefix("https://") {
-            normalized = "https://" + normalized
-        }
-        normalized = normalized.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-
-        guard URL(string: normalized) != nil else {
+        let normalized: String
+        do {
+            normalized = try ForumURLPolicy.normalize(trimmed)
+        } catch ForumURLPolicy.ValidationError.insecureScheme {
+            errorMessage = String(localized: "add_forum.error.https_required")
+            return false
+        } catch {
             errorMessage = String(localized: "add_forum.error.invalid_url")
             return false
         }
@@ -53,9 +53,12 @@ final class AddForumViewModel {
     private func resolveIconURL(base: String, info: DiscourseBasicInfo) -> String? {
         // Prefer apple touch icon (180x180) > logo > favicon
         guard let path = info.appleTouchIconURL ?? info.logoURL ?? info.faviconURL else { return nil }
-        if path.hasPrefix("http") {
-            return path
+        if path.hasPrefix("//") {
+            return "https:" + path
         }
-        return base + path
+        if let url = URL(string: path), url.scheme != nil {
+            return url.scheme?.lowercased() == "https" ? url.absoluteString : nil
+        }
+        return path.hasPrefix("/") ? base + path : base + "/" + path
     }
 }

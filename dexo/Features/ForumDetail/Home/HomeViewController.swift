@@ -80,6 +80,7 @@ final class HomeViewController: ObservableViewController {
             avatarURL: avatarURL,
             categoryName: category?.name,
             categoryColor: categoryColor,
+            timestampKind: self.viewModel.feedMode.timestampKind
         )
         return cell
     }
@@ -236,6 +237,12 @@ final class HomeViewController: ObservableViewController {
         ])
 
         loginButton.addTarget(self, action: #selector(loginTapped), for: .touchUpInside)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(authDidChange(_:)),
+            name: .discourseAuthDidChange,
+            object: nil
+        )
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(customView: categoryButton)
         inheritedRightBarItems = navigationItem.rightBarButtonItems ?? []
@@ -298,6 +305,11 @@ final class HomeViewController: ObservableViewController {
             }
         }
         snapshot.appendItems(regularIds, toSection: 0)
+        let currentIds = Set(dataSource.snapshot().itemIdentifiers)
+        let idsToRefresh = regularIds.filter { currentIds.contains($0) }
+        if !idsToRefresh.isEmpty {
+            snapshot.reconfigureItems(idsToRefresh)
+        }
         dataSource.apply(snapshot, animatingDifferences: true)
         installPinnedHeader(items: pinnedItems)
 
@@ -315,23 +327,23 @@ final class HomeViewController: ObservableViewController {
     }
 
     private func buildSortMenu() -> UIMenu {
-        let modes: [(HomeListMode, String, String)] = [
-            (.latest, String(localized: "home.latest"), "clock"),
+        let modes: [(TopicFeedMode, String, String)] = [
+            (.activity, String(localized: "home.activity"), "clock.arrow.circlepath"),
+            (.created, String(localized: "home.created"), "calendar"),
             (.hot, String(localized: "home.hot"), "flame"),
             (.top, String(localized: "home.top"), "chart.bar"),
         ]
         let actions = modes.map { mode, title, symbol -> UIAction in
-            let state: UIMenuElement.State = viewModel.listMode == mode ? .on : .off
+            let state: UIMenuElement.State = viewModel.feedMode == mode ? .on : .off
             return UIAction(title: title, image: UIImage(systemName: symbol), state: state) { [weak self] _ in
-                self?.selectListMode(mode)
+                self?.selectFeedMode(mode)
             }
         }
         return UIMenu(title: "", children: actions)
     }
 
-    private func selectListMode(_ mode: HomeListMode) {
-        guard viewModel.listMode != mode else { return }
-        viewModel.listMode = mode
+    private func selectFeedMode(_ mode: TopicFeedMode) {
+        guard viewModel.selectFeedMode(mode) else { return }
         sortBarButton.menu = buildSortMenu()
         Task {
             await viewModel.loadTopics()
@@ -436,11 +448,19 @@ final class HomeViewController: ObservableViewController {
     }
 
     @objc private func loginTapped() {
-        authGate?.requireAuth { [weak self] in
-            guard let self else { return }
-            Task {
-                await self.viewModel.reloadCategories()
-            }
+        // A successful login posts `discourseAuthDidChange`; the observer below
+        // performs one complete categories + topics reload with the new
+        // credential.
+        authGate?.requireAuth {}
+    }
+
+    @objc private func authDidChange(_ notification: Notification) {
+        guard let changedBaseURL = notification.userInfo?["baseURL"] as? String,
+              changedBaseURL == api.baseURL
+        else { return }
+
+        Task {
+            await viewModel.reloadAfterAuthChange()
         }
     }
 
@@ -503,7 +523,7 @@ final class HomeViewController: ObservableViewController {
     }
 
     private func selectCategory(_ categoryId: Int?) {
-        viewModel.selectedCategoryId = categoryId
+        guard viewModel.selectCategory(categoryId) else { return }
         updateCategoryButton()
         Task {
             await viewModel.loadTopics()

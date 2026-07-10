@@ -60,7 +60,7 @@ final class ForumListViewController: ObservableViewController {
               let lastId = settings.lastOpenedForumId,
               let forum = viewModel.forums.first(where: { $0.id == lastId }),
               let window = view.window else { return }
-        ForumOverlayManager.shared.present(forum: forum, in: window)
+        openForum(forum, in: window, showAutoOpenPrompt: false)
     }
 
     override func updateUI() {
@@ -68,6 +68,11 @@ final class ForumListViewController: ObservableViewController {
         snapshot.appendSections([0])
         let ids = viewModel.forums.compactMap(\.id)
         snapshot.appendItems(ids, toSection: 0)
+        let currentIds = Set(dataSource.snapshot().itemIdentifiers)
+        let idsToRefresh = ids.filter { currentIds.contains($0) }
+        if !idsToRefresh.isEmpty {
+            snapshot.reconfigureItems(idsToRefresh)
+        }
         dataSource.apply(snapshot, animatingDifferences: true)
     }
 
@@ -94,9 +99,97 @@ extension ForumListViewController: UITableViewDelegate {
         guard indexPath.row < viewModel.forums.count,
               let window = view.window else { return }
         let forum = viewModel.forums[indexPath.row]
+        openForum(forum, in: window, showAutoOpenPrompt: true)
+    }
+
+    private func openForum(_ forum: ForumInstance, in window: UIWindow, showAutoOpenPrompt: Bool) {
+        guard ForumURLPolicy.isSecure(forum.baseURL) else {
+            showBlockedForumAlert(for: forum)
+            return
+        }
+
         settings.lastOpenedForumId = forum.id
         ForumOverlayManager.shared.present(forum: forum, in: window)
-        showAutoOpenPromptIfNeeded()
+        if showAutoOpenPrompt {
+            showAutoOpenPromptIfNeeded()
+        }
+    }
+
+    private func showBlockedForumAlert(for forum: ForumInstance) {
+        guard presentedViewController == nil else { return }
+
+        guard let candidate = try? ForumURLPolicy.httpsUpgradeCandidate(from: forum.baseURL) else {
+            let alert = UIAlertController(
+                title: String(localized: "forum.security.blocked.title"),
+                message: String(localized: "forum.security.blocked.message"),
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+            present(alert, animated: true)
+            return
+        }
+
+        let alert = UIAlertController(
+            title: String(localized: "forum.https_upgrade.title"),
+            message: String(localized: "forum.https_upgrade.message \(candidate)"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(
+            title: String(localized: "forum.https_upgrade.action"),
+            style: .default
+        ) { [weak self] _ in
+            self?.performHTTPSUpgrade(for: forum)
+        })
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func performHTTPSUpgrade(for forum: ForumInstance) {
+        let progressAlert = UIAlertController(
+            title: String(localized: "forum.https_upgrade.checking"),
+            message: nil,
+            preferredStyle: .alert
+        )
+        present(progressAlert, animated: true)
+
+        Task { [weak self, weak progressAlert] in
+            guard let self, let progressAlert else { return }
+            do {
+                let updated = try await self.viewModel.upgradeForumToHTTPS(forum)
+                progressAlert.dismiss(animated: true) { [weak self] in
+                    self?.showHTTPSUpgradeSucceeded(updated)
+                }
+            } catch {
+                debugLog("[ForumList] HTTPS upgrade failed: \(error)")
+                progressAlert.dismiss(animated: true) { [weak self] in
+                    self?.showHTTPSUpgradeFailed()
+                }
+            }
+        }
+    }
+
+    private func showHTTPSUpgradeSucceeded(_ forum: ForumInstance) {
+        let alert = UIAlertController(
+            title: String(localized: "forum.https_upgrade.success.title"),
+            message: String(localized: "forum.https_upgrade.success.message \(forum.baseURL)"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.open"), style: .default) { [weak self] _ in
+            guard let self, let window = self.view.window else { return }
+            self.openForum(forum, in: window, showAutoOpenPrompt: true)
+        })
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func showHTTPSUpgradeFailed() {
+        let alert = UIAlertController(
+            title: String(localized: "forum.https_upgrade.failure.title"),
+            message: String(localized: "forum.https_upgrade.failure.message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+        present(alert, animated: true)
     }
 
     private func showAutoOpenPromptIfNeeded() {
@@ -117,7 +210,7 @@ extension ForumListViewController: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        let deleteAction = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
+        let deleteAction = UIContextualAction(style: .destructive, title: String(localized: "action.delete")) { [weak self] _, _, completion in
             self?.viewModel.deleteForum(at: indexPath.row)
             completion(true)
         }

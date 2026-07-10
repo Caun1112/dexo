@@ -52,10 +52,8 @@ final class WebCookieStore {
         return jar.values.filter { cookie in
             // Skip expired cookies so a stale/expired `_t` left in the jar never gets sent.
             if let expires = cookie.expiresDate, expires <= now { return false }
-            let domain = cookie.domain.lowercased()
-            let domainMatch = host == domain
-                || (domain.hasPrefix(".") && (host == String(domain.dropFirst()) || host.hasSuffix(domain)))
-            return domainMatch && path.hasPrefix(cookie.path)
+            return Self.cookieDomain(cookie.domain, matchesHost: host)
+                && path.hasPrefix(cookie.path)
         }
     }
 
@@ -90,11 +88,22 @@ final class WebCookieStore {
         guard let host = URL(string: baseURL)?.host?.lowercased() else { return }
         lock.lock()
         jar = jar.filter { _, cookie in
-            let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            return domain != host && !host.hasSuffix(domain)
+            !Self.cookieDomain(cookie.domain, matchesHost: host)
         }
         lock.unlock()
         save()
+    }
+
+    /// Returns whether a cookie's domain applies to a host. Domain cookies
+    /// require a dot boundary, so `.example.com` matches `forum.example.com`
+    /// but never `notexample.com`. Host-only cookies remain exact matches.
+    static func cookieDomain(_ cookieDomain: String, matchesHost host: String) -> Bool {
+        let normalizedHost = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        let rawDomain = cookieDomain.lowercased()
+        let normalizedDomain = rawDomain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !normalizedHost.isEmpty, !normalizedDomain.isEmpty else { return false }
+        if normalizedHost == normalizedDomain { return true }
+        return rawDomain.hasPrefix(".") && normalizedHost.hasSuffix("." + normalizedDomain)
     }
 
     // MARK: - Persistence

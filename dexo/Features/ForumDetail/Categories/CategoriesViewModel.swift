@@ -15,12 +15,12 @@ final class CategoriesViewModel {
         self.api = api
     }
 
-    func loadCategories() async {
+    func loadCategories(forceRefresh: Bool = false) async {
         isLoading = true
         errorMessage = nil
         requiresLogin = false
         do {
-            let result = try await api.fetchCategories()
+            let result = try await api.fetchAllCategories(forceRefresh: forceRefresh)
             categories = result.categoryList.categories.filter { $0.parentCategoryId == nil }
         } catch {
             if let apiError = error as? DiscourseAPIError, apiError.isNotLoggedIn || apiError.isForbidden {

@@ -13,17 +13,44 @@ enum KeychainHelper {
             kSecAttrAccount as String: baseURL,
         ]
 
-        // Delete existing item first
-        SecItemDelete(query as CFDictionary)
+        // Updating an existing item is atomic: if the update fails, Keychain
+        // keeps the previous credential intact. Never delete-first here,
+        // because a transient Keychain failure must not log the user out.
+        let updateStatus = SecItemUpdate(
+            query as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        if updateStatus == errSecSuccess {
+            return
+        }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainError.unhandledError(status: updateStatus)
+        }
 
         var addQuery = query
         addQuery[kSecValueData as String] = data
         addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
 
         let status = SecItemAdd(addQuery as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw KeychainError.unhandledError(status: status)
+        if status == errSecSuccess {
+            return
         }
+
+        // Another writer may have inserted the item between the update and
+        // add. Retrying the atomic update resolves that race without deleting
+        // either value.
+        if status == errSecDuplicateItem {
+            let retryStatus = SecItemUpdate(
+                query as CFDictionary,
+                [kSecValueData as String: data] as CFDictionary
+            )
+            guard retryStatus == errSecSuccess else {
+                throw KeychainError.unhandledError(status: retryStatus)
+            }
+            return
+        }
+
+        throw KeychainError.unhandledError(status: status)
     }
 
     static func getUserApiKey(for baseURL: String) -> String? {

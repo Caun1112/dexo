@@ -142,7 +142,13 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
             emptyLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 32),
             emptyLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -32),
         ])
+    }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // The shared API cache is invalidated on an auth change. Reloading on
+        // entry ensures a previously opened Search tab does not keep the old
+        // anonymous category list.
         Task {
             await viewModel.loadCategories()
         }

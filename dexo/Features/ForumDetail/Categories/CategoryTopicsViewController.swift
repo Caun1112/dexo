@@ -169,6 +169,11 @@ final class CategoryTopicsViewController: ObservableViewController {
             return topic.id
         }
         snapshot.appendItems(uniqueIds, toSection: 0)
+        let currentIds = Set(dataSource.snapshot().itemIdentifiers)
+        let idsToRefresh = uniqueIds.filter { currentIds.contains($0) }
+        if !idsToRefresh.isEmpty {
+            snapshot.reconfigureItems(idsToRefresh)
+        }
         dataSource.apply(snapshot, animatingDifferences: true)
 
         if viewModel.isLoading {

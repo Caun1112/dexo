@@ -1,6 +1,33 @@
 import SDWebImage
 import UIKit
 
+struct TopicCellMetadata: Equatable {
+    let categoryName: String?
+    let visibleTagNames: [String]
+    let hiddenTagCount: Int
+    let allTagNames: [String]
+
+    init(categoryName: String?, tags: [TopicListTag], maximumVisibleTags: Int = 2) {
+        let normalizedCategory = categoryName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.categoryName = normalizedCategory?.isEmpty == false ? normalizedCategory : nil
+
+        allTagNames = tags.map(\.name)
+        let visibleCount = min(max(maximumVisibleTags, 0), tags.count)
+        visibleTagNames = Array(allTagNames.prefix(visibleCount))
+        hiddenTagCount = tags.count - visibleCount
+    }
+
+    var displayText: String {
+        var components = categoryName.map { [$0] } ?? []
+        components.append(contentsOf: visibleTagNames)
+        var text = components.joined(separator: " · ")
+        if hiddenTagCount > 0 {
+            text += text.isEmpty ? "+\(hiddenTagCount)" : " +\(hiddenTagCount)"
+        }
+        return text
+    }
+}
+
 final class TopicCell: UITableViewCell {
     static let reuseIdentifier = "TopicCell"
 
@@ -40,8 +67,33 @@ final class TopicCell: UITableViewCell {
         let label = UILabel()
         label.font = FontManager.shared.font(size: 12)
         label.textColor = .secondaryLabel
+        label.lineBreakMode = .byTruncatingMiddle
         label.translatesAutoresizingMaskIntoConstraints = false
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
+    }()
+
+    private let tagStack: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        stack.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        return stack
+    }()
+
+    private let metadataStack: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return stack
     }()
 
     private let timeLabel: UILabel = {
@@ -69,8 +121,10 @@ final class TopicCell: UITableViewCell {
         contentView.addSubview(avatarImageView)
         contentView.addSubview(titleLabel)
         contentView.addSubview(replyCountLabel)
-        contentView.addSubview(categoryLabel)
+        contentView.addSubview(metadataStack)
         contentView.addSubview(timeLabel)
+        metadataStack.addArrangedSubview(categoryLabel)
+        metadataStack.addArrangedSubview(tagStack)
 
         isAccessibilityElement = true
         accessibilityTraits = .button
@@ -92,14 +146,14 @@ final class TopicCell: UITableViewCell {
             replyCountLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             replyCountLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
 
-            categoryLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-            categoryLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            categoryLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 16),
-            categoryLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
+            metadataStack.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            metadataStack.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            metadataStack.heightAnchor.constraint(greaterThanOrEqualToConstant: 18),
+            metadataStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
 
-            timeLabel.centerYAnchor.constraint(equalTo: categoryLabel.centerYAnchor),
+            timeLabel.centerYAnchor.constraint(equalTo: metadataStack.centerYAnchor),
             timeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            timeLabel.leadingAnchor.constraint(greaterThanOrEqualTo: categoryLabel.trailingAnchor, constant: 8),
+            timeLabel.leadingAnchor.constraint(greaterThanOrEqualTo: metadataStack.trailingAnchor, constant: 8),
         ])
     }
 
@@ -108,7 +162,20 @@ final class TopicCell: UITableViewCell {
         avatarURL: URL?,
         categoryName: String?,
         categoryColor: UIColor?,
+        timestampKind: TopicTimestampKind = .activity,
     ) {
+        let titleFont = FontManager.shared.font(size: 16, weight: .medium)
+        let replyFont = FontManager.shared.font(size: 16, weight: .bold)
+        let metadataFont = FontManager.shared.font(size: 12)
+        titleLabel.font = titleFont
+        replyCountLabel.font = replyFont
+        categoryLabel.font = metadataFont
+        timeLabel.font = metadataFont
+        tagStack.arrangedSubviews.forEach { view in
+            tagStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
         let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
         avatarWidthConstraint.constant = avatarSize
         avatarHeightConstraint.constant = avatarSize
@@ -121,27 +188,36 @@ final class TopicCell: UITableViewCell {
         replyCountLabel.text = "\(replies)"
         replyCountLabel.textColor = Self.replyCountColor(replies)
 
-        // Category
-        if let name = categoryName {
-            let attrStr = NSMutableAttributedString()
+        // Category and topic tags share a compact metadata line. Tags are
+        // visual badges only; the cell remains the single tap target.
+        let metadataModel = TopicCellMetadata(categoryName: categoryName, tags: topic.tags)
+        let metadata = NSMutableAttributedString()
+        if let name = metadataModel.categoryName {
             if let color = categoryColor {
                 let dot = NSTextAttachment()
                 let dotConfig = UIImage.SymbolConfiguration(pointSize: 8, weight: .bold)
                 dot.image = UIImage(systemName: "circle.fill", withConfiguration: dotConfig)?.withTintColor(color, renderingMode: .alwaysOriginal)
-                attrStr.append(NSAttributedString(attachment: dot))
-                attrStr.append(NSAttributedString(string: " "))
+                metadata.append(NSAttributedString(attachment: dot))
+                metadata.append(NSAttributedString(string: " "))
             }
-            attrStr.append(NSAttributedString(string: name, attributes: [
+            metadata.append(NSAttributedString(string: name, attributes: [
                 .foregroundColor: UIColor.secondaryLabel,
-                .font: FontManager.shared.font(size: 12),
+                .font: metadataFont,
             ]))
-            categoryLabel.attributedText = attrStr
-        } else {
-            categoryLabel.attributedText = nil
         }
+        categoryLabel.attributedText = metadataModel.categoryName == nil ? nil : metadata
+        categoryLabel.isHidden = metadataModel.categoryName == nil
+
+        for tagName in metadataModel.visibleTagNames {
+            tagStack.addArrangedSubview(Self.makeTagBadge(text: tagName, font: metadataFont, preservesText: false))
+        }
+        if metadataModel.hiddenTagCount > 0 {
+            tagStack.addArrangedSubview(Self.makeTagBadge(text: "+\(metadataModel.hiddenTagCount)", font: metadataFont, preservesText: true))
+        }
+        tagStack.isHidden = tagStack.arrangedSubviews.isEmpty
 
         // Time
-        timeLabel.text = Self.formatDate(topic.lastPostedAt ?? topic.createdAt)
+        timeLabel.text = Self.formatDate(timestampKind.dateString(for: topic))
 
         // Avatar
         if let url = avatarURL {
@@ -151,7 +227,18 @@ final class TopicCell: UITableViewCell {
         }
 
         let repliesText = String(localized: "topic.cell.a11y.replies \(replies)")
-        let parts = [topic.title, categoryName, repliesText, timeLabel.text]
+        let tagsText: String? = metadataModel.allTagNames.isEmpty
+            ? nil
+            : String(localized: "topic.cell.a11y.tags \(metadataModel.allTagNames.joined(separator: ", "))")
+        let timeText = timeLabel.text.map { time in
+            switch timestampKind {
+            case .activity:
+                return String(localized: "topic.cell.a11y.activity \(time)")
+            case .created:
+                return String(localized: "topic.cell.a11y.created \(time)")
+            }
+        }
+        let parts = [topic.title, metadataModel.categoryName, tagsText, repliesText, timeText]
             .compactMap { (s: String?) -> String? in
                 guard let s, !s.isEmpty else { return nil }
                 return s
@@ -165,6 +252,12 @@ final class TopicCell: UITableViewCell {
         titleLabel.attributedText = nil
         replyCountLabel.text = nil
         categoryLabel.attributedText = nil
+        categoryLabel.isHidden = false
+        tagStack.arrangedSubviews.forEach { view in
+            tagStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        tagStack.isHidden = false
         timeLabel.text = nil
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
@@ -255,9 +348,30 @@ final class TopicCell: UITableViewCell {
         )
     }
 
+    private static func makeTagBadge(text: String, font: UIFont, preservesText: Bool) -> UILabel {
+        let label = TopicTagBadgeLabel()
+        label.text = text
+        label.font = font
+        label.textColor = ThemeManager.shared.accentColor.withAlphaComponent(0.82)
+        label.backgroundColor = ThemeManager.shared.codeBackgroundColor
+        label.lineBreakMode = .byTruncatingTail
+        label.layer.cornerRadius = 7
+        label.layer.masksToBounds = true
+        label.isAccessibilityElement = false
+        label.setContentHuggingPriority(preservesText ? .required : .defaultHigh, for: .horizontal)
+        label.setContentCompressionResistancePriority(preservesText ? .required : .defaultLow, for: .horizontal)
+        return label
+    }
+
     private static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoFormatterWithoutFractionalSeconds: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
         return f
     }()
 
@@ -268,11 +382,40 @@ final class TopicCell: UITableViewCell {
     }()
 
     private static func formatDate(_ isoString: String) -> String {
-        guard let date = isoFormatter.date(from: isoString) else { return isoString }
+        guard let date = isoFormatter.date(from: isoString)
+            ?? isoFormatterWithoutFractionalSeconds.date(from: isoString)
+        else { return isoString }
         let now = Date()
         if abs(date.timeIntervalSince(now)) < 5 {
             return String(localized: "time.just_now")
         }
         return relativeFormatter.localizedString(for: date, relativeTo: now)
+    }
+}
+
+private final class TopicTagBadgeLabel: UILabel {
+    private let contentInsets = UIEdgeInsets(top: 2, left: 7, bottom: 2, right: 7)
+
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(
+            width: size.width + contentInsets.left + contentInsets.right,
+            height: size.height + contentInsets.top + contentInsets.bottom
+        )
+    }
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: contentInsets))
+    }
+
+    override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
+        let insetBounds = bounds.inset(by: contentInsets)
+        let rect = super.textRect(forBounds: insetBounds, limitedToNumberOfLines: numberOfLines)
+        return rect.inset(by: UIEdgeInsets(
+            top: -contentInsets.top,
+            left: -contentInsets.left,
+            bottom: -contentInsets.bottom,
+            right: -contentInsets.right
+        ))
     }
 }
