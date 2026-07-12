@@ -239,6 +239,7 @@ final class TopicDetailViewController: ObservableViewController {
     /// completion. Used to skip duplicate scheduling.
     private var heightWarmupInFlightWidth: CGFloat = 0
     private var isThemeRefreshScheduled = false
+    private var pendingThemeRefresh = false
     private let imageZoomTransition = ImageZoomTransitionDelegate()
     private lazy var boostDanmaku = BoostDanmakuOverlay(hostView: view)
     private let readTracker = TopicReadTracker()
@@ -673,20 +674,44 @@ final class TopicDetailViewController: ObservableViewController {
     /// view trees alive across cell reuse, while some renderers capture colors
     /// at render time and AsyncTextView stores a rasterized bitmap.
     private func refreshThemeAppearance() {
-        guard isViewLoaded, !isThemeRefreshScheduled else { return }
+        guard isViewLoaded else { return }
+        contentViewCache.removeAll()
+
+        // Pagination owns snapshot application while it is active. Defer the
+        // reload until that flow has finished instead of mixing two snapshot
+        // mutations in the same run-loop turn.
+        guard paginationContext == .idle else {
+            pendingThemeRefresh = true
+            return
+        }
+        guard !isThemeRefreshScheduled else { return }
         isThemeRefreshScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.isThemeRefreshScheduled = false
-            self.contentViewCache.removeAll()
+            guard self.paginationContext == .idle else {
+                self.pendingThemeRefresh = true
+                return
+            }
 
             guard let visibleIndexPaths = self.tableView.indexPathsForVisibleRows,
                   !visibleIndexPaths.isEmpty
             else { return }
 
+            let currentSnapshot = self.dataSource.snapshot()
+            let visibleItems = Set(visibleIndexPaths.compactMap {
+                self.dataSource.itemIdentifier(for: $0)
+            })
+            let reloadableItems = visibleItems.filter {
+                currentSnapshot.indexOfItem($0) != NSNotFound
+            }
+            guard !reloadableItems.isEmpty else { return }
+
+            var refreshedSnapshot = currentSnapshot
+            refreshedSnapshot.reloadItems(Array(reloadableItems))
             let offset = self.tableView.contentOffset
             UIView.performWithoutAnimation {
-                self.tableView.reloadRows(at: visibleIndexPaths, with: .none)
+                self.dataSource.apply(refreshedSnapshot, animatingDifferences: false)
                 self.tableView.layoutIfNeeded()
             }
             self.tableView.setContentOffset(offset, animated: false)
@@ -861,6 +886,10 @@ final class TopicDetailViewController: ObservableViewController {
     private func endPaginationContext(_ token: UInt) {
         guard paginationToken == token else { return }
         paginationContext = .idle
+        if pendingThemeRefresh {
+            pendingThemeRefresh = false
+            refreshThemeAppearance()
+        }
     }
 
     /// True iff the flow that captured `token` still owns the context. Tasks
