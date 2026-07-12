@@ -270,7 +270,7 @@ final class PostNativeCell: UITableViewCell {
     private let nameBackgroundView: UIView = {
         let v = UIView()
         v.translatesAutoresizingMaskIntoConstraints = false
-        v.layer.cornerRadius = 3
+        v.layer.cornerRadius = 6
         v.layer.cornerCurve = .continuous
         v.isHidden = true
         return v
@@ -792,9 +792,9 @@ final class PostNativeCell: UITableViewCell {
         if isOP {
             let accent = ThemeManager.shared.accentColor
             nameLabel.text = post.name ?? post.username
-            nameLabel.textColor = .white
+            nameLabel.textColor = accent
             nameBackgroundView.isHidden = false
-            nameBackgroundView.backgroundColor = accent
+            nameBackgroundView.backgroundColor = accent.withAlphaComponent(0.12)
             nameBgLeading.constant = Self.opPillHorizontalPadding
             nameBgTrailing.constant = Self.opPillHorizontalPadding
             nameBgTop.constant = Self.opPillVerticalPadding
