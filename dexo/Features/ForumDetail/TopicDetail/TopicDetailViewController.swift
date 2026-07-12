@@ -238,6 +238,7 @@ final class TopicDetailViewController: ObservableViewController {
     /// Width the warmup task in-flight is using. Set on dispatch, cleared on
     /// completion. Used to skip duplicate scheduling.
     private var heightWarmupInFlightWidth: CGFloat = 0
+    private var isThemeRefreshScheduled = false
     private let imageZoomTransition = ImageZoomTransitionDelegate()
     private lazy var boostDanmaku = BoostDanmakuOverlay(hostView: view)
     private let readTracker = TopicReadTracker()
@@ -639,6 +640,10 @@ final class TopicDetailViewController: ObservableViewController {
             self, selector: #selector(appWillEnterForeground),
             name: UIApplication.willEnterForegroundNotification, object: nil
         )
+        nc.addObserver(
+            self, selector: #selector(topicThemeDidChange),
+            name: ThemeManager.themeDidChangeNotification, object: nil
+        )
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -649,6 +654,43 @@ final class TopicDetailViewController: ObservableViewController {
         // `readFlushDebounce` (1.5s) so visible cells cross the 1s min threshold
         // and get included in the snapshot.
         scheduleDebouncedReadFlush()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) == true else {
+            return
+        }
+        refreshThemeAppearance()
+    }
+
+    @objc private func topicThemeDidChange() {
+        refreshThemeAppearance()
+    }
+
+    /// Rebuilds only rendered content, not topic data or height measurements.
+    /// This is needed because the topic controller intentionally keeps rendered
+    /// view trees alive across cell reuse, while some renderers capture colors
+    /// at render time and AsyncTextView stores a rasterized bitmap.
+    private func refreshThemeAppearance() {
+        guard isViewLoaded, !isThemeRefreshScheduled else { return }
+        isThemeRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isThemeRefreshScheduled = false
+            self.contentViewCache.removeAll()
+
+            guard let visibleIndexPaths = self.tableView.indexPathsForVisibleRows,
+                  !visibleIndexPaths.isEmpty
+            else { return }
+
+            let offset = self.tableView.contentOffset
+            UIView.performWithoutAnimation {
+                self.tableView.reloadRows(at: visibleIndexPaths, with: .none)
+                self.tableView.layoutIfNeeded()
+            }
+            self.tableView.setContentOffset(offset, animated: false)
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {

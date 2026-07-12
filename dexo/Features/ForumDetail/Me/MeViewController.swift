@@ -112,7 +112,7 @@ final class MeViewController: ObservableViewController {
         let summary = viewModel.summary
 
         // Show skeleton on first load, hide once data arrives
-        if !hasLoaded, isLoading {
+        if !hasLoaded, isLoading, currentUser == nil {
             skeletonView.isHidden = false
             tableView.isHidden = true
             return
@@ -213,9 +213,7 @@ final class MeViewController: ObservableViewController {
         alert.addAction(UIAlertAction(title: String(localized: "me.logout"), style: .destructive) { [weak self] _ in
             guard let self else { return }
             self.authGate?.performLogout()
-            self.viewModel.currentUser = nil
-            self.viewModel.userProfile = nil
-            self.viewModel.summary = nil
+            self.viewModel.clearCachedProfile()
             self.viewModel.requiresLogin = true
         })
         alert.addAction(UIAlertAction(title: String(localized: "cancel"), style: .cancel))

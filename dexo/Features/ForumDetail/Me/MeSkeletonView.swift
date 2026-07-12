@@ -27,7 +27,7 @@ final class MeSkeletonView: UIView {
 
     private func setup() {
         // --- Header area ---
-        let avatar = makeShimmer(height: 50, width: 50, radius: 25)
+        let avatar = makeShimmer(height: 68, width: 68, radius: 34)
         let nameLine = makeShimmer(height: 16)
         let usernameLine = makeShimmer(height: 12)
 

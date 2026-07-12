@@ -30,7 +30,7 @@ struct DiscourseUserProfileResponse: Decodable {
     let user: DiscourseUserProfile
 }
 
-struct DiscourseUserProfile: Decodable {
+struct DiscourseUserProfile: Codable {
     let id: Int
     let username: String
     let name: String?

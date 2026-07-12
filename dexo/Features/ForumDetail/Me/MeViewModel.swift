@@ -12,14 +12,30 @@ final class MeViewModel {
     var errorMessage: String?
 
     private let api: DiscourseAPI
+    private let cacheStore = ProfileCacheStore.shared
 
     init(api: DiscourseAPI) {
         self.api = api
     }
 
-    func loadProfile() async {
+    func loadProfile(forceRefresh: Bool = false) async {
+        guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
+
+        let cachedEntry = cacheStore.load(for: api.baseURL)
+        let cachedUsername = cachedEntry?.username
+        let knownUsername = AuthManager.shared.username(for: api.baseURL)
+        let usernameMatches = knownUsername == nil || knownUsername == cachedUsername
+
+        if !forceRefresh, let cachedEntry, usernameMatches {
+            apply(profile: cachedEntry.profile, summary: cachedEntry.summary)
+            if cachedEntry.isFresh {
+                isLoading = false
+                return
+            }
+        }
+
         do {
             // Prefer the AuthManager cache (populated at login), but fall back
             // to `/session/current.json` when it's empty — `fetchAndCacheUsername`
@@ -27,8 +43,11 @@ final class MeViewModel {
             // leaving the cache unset even though the API key was saved. Without
             // this fallback the profile screen would stay empty after login.
             let username: String
-            if let cached = AuthManager.shared.username(for: api.baseURL) {
+            if let cached = knownUsername {
                 username = cached
+            } else if let cachedUsername, usernameMatches {
+                username = cachedUsername
+                AuthManager.shared.setCachedUsername(username, for: api.baseURL)
             } else if api.isLinuxDo {
                 // linux.do's /session/current.json returns empty; use notifications instead.
                 let notifList = try await api.fetchNotifications()
@@ -43,20 +62,16 @@ final class MeViewModel {
                 AuthManager.shared.setCachedUsername(username, for: api.baseURL)
             }
 
-            let profile = try await api.fetchUserProfile(username: username)
-            let userSummary = try? await api.fetchUserSummary(username: username)
-            currentUser = DiscourseCurrentUser(
-                id: profile.id, username: profile.username,
-                name: profile.name, avatarTemplate: profile.avatarTemplate,
-                unreadNotifications: nil, unreadPrivateMessages: nil,
-                unreadHighPriorityNotifications: nil
-            )
-            userProfile = profile
-            summary = userSummary
+            async let profileRequest = api.fetchUserProfile(username: username)
+            async let summaryRequest = api.fetchUserSummary(username: username)
+            let profile = try await profileRequest
+            let userSummary = try? await summaryRequest
+            apply(profile: profile, summary: userSummary)
+            cacheStore.save(profile: profile, summary: userSummary, for: api.baseURL)
         } catch {
             if let apiError = error as? DiscourseAPIError, apiError.isNotLoggedIn || apiError.isForbidden {
                 requiresLogin = true
-            } else {
+            } else if currentUser == nil {
                 errorMessage = error.localizedDescription
             }
         }
@@ -66,9 +81,27 @@ final class MeViewModel {
     func reload() async {
         requiresLogin = false
         errorMessage = nil
+        await loadProfile(forceRefresh: true)
+    }
+
+    func clearCachedProfile() {
+        cacheStore.remove(for: api.baseURL)
         currentUser = nil
         userProfile = nil
         summary = nil
-        await loadProfile()
+    }
+
+    private func apply(profile: DiscourseUserProfile, summary: DiscourseUserSummary?) {
+        currentUser = DiscourseCurrentUser(
+            id: profile.id,
+            username: profile.username,
+            name: profile.name,
+            avatarTemplate: profile.avatarTemplate,
+            unreadNotifications: nil,
+            unreadPrivateMessages: nil,
+            unreadHighPriorityNotifications: nil
+        )
+        userProfile = profile
+        self.summary = summary
     }
 }

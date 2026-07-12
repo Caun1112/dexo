@@ -16,7 +16,7 @@ final class ProfileHeaderView: UIView {
     /// Own profile → navigate to the DM inbox; other profile → compose a new DM.
     var onMessageTapped: (() -> Void)?
 
-    private static let baseAvatarSize: CGFloat = 50
+    private static let baseAvatarSize: CGFloat = 68
     private var avatarWidthConstraint: NSLayoutConstraint!
     private var avatarHeightConstraint: NSLayoutConstraint!
 
@@ -105,6 +105,15 @@ final class ProfileHeaderView: UIView {
         return button
     }()
 
+    private lazy var messageButtonRow: UIStackView = {
+        let row = UIStackView(arrangedSubviews: [messageButton])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.distribution = .fill
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }()
+
     // Login prompt state
     private let loginPromptLabel: UILabel = {
         let label = UILabel()
@@ -179,6 +188,8 @@ final class ProfileHeaderView: UIView {
 
         loggedInContainer.addArrangedSubview(joinDateLabel)
         loggedInContainer.setCustomSpacing(12, after: statsStackView)
+        loggedInContainer.addArrangedSubview(messageButtonRow)
+        loggedInContainer.setCustomSpacing(12, after: joinDateLabel)
 
         loggedOutContainer.addArrangedSubview(loginPromptLabel)
 //        loggedOutContainer.addArrangedSubview(loginButton)
@@ -196,28 +207,37 @@ final class ProfileHeaderView: UIView {
             // Horizontal insets align with the `.insetGrouped` cell content start
             // (section inset 20pt + cell layout margin ~12pt), using
             // `safeAreaLayoutGuide` for iPad split-view / landscape safety.
-            loggedInContainer.topAnchor.constraint(equalTo: topAnchor, constant: 24),
-            loggedInContainer.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 32),
-            loggedInContainer.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -32),
-            loggedInContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
+            loggedInContainer.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            loggedInContainer.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            loggedInContainer.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            loggedInContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
 
             loggedOutContainer.topAnchor.constraint(equalTo: topAnchor, constant: 40),
             loggedOutContainer.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 32),
             loggedOutContainer.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -32),
             loggedOutContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
 
-            statsStackView.leadingAnchor.constraint(equalTo: loggedInContainer.leadingAnchor),
-            statsStackView.trailingAnchor.constraint(equalTo: loggedInContainer.trailingAnchor),
+            statsStackView.leadingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.leadingAnchor),
+            statsStackView.trailingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.trailingAnchor),
         ])
+
+        loggedInContainer.isLayoutMarginsRelativeArrangement = true
+        loggedInContainer.layoutMargins = UIEdgeInsets(top: 20, left: 20, bottom: 18, right: 20)
+        loggedInContainer.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        loggedInContainer.layer.cornerRadius = 18
+        loggedInContainer.clipsToBounds = true
 
 //        loginButton.addTarget(self, action: #selector(loginTapped), for: .touchUpInside)
     }
 
     func configure(user: DiscourseCurrentUser?, userProfile: DiscourseUserProfile?, summary: DiscourseUserSummary?, assetBaseURL: String) {
         let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
+        let theme = ThemeManager.shared
         avatarWidthConstraint.constant = avatarSize
         avatarHeightConstraint.constant = avatarSize
         avatarImageView.layer.cornerRadius = avatarSize / 2
+        avatarImageView.backgroundColor = theme.backgroundColor
+        loggedInContainer.backgroundColor = theme.cardBackgroundColor
 
         if let user {
             loggedInContainer.isHidden = false
@@ -286,6 +306,7 @@ final class ProfileHeaderView: UIView {
                 (String(localized: "me.stats.topics"), summary.topicCount, .topics),
                 (String(localized: "me.stats.posts"), summary.postCount, .posts),
                 (String(localized: "me.stats.likes"), summary.likesReceived, .likes),
+                (String(localized: "me.stats.days"), summary.daysVisited, .days),
             ]
 
             for (label, value, statType) in items {
@@ -294,12 +315,8 @@ final class ProfileHeaderView: UIView {
             }
         }
 
-        // Spacer pushes the message button to the right edge regardless of stat width.
-        let spacer = UIView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        statsStackView.addArrangedSubview(spacer)
-        statsStackView.addArrangedSubview(messageButton)
+        statsStackView.distribution = .fillEqually
+        statsStackView.spacing = 8
     }
 
     private func createStatView(title: String, value: Int, statType: StatType) -> UIView {
@@ -310,6 +327,10 @@ final class ProfileHeaderView: UIView {
         container.isUserInteractionEnabled = true
         container.tag = statType.rawValue
         container.setContentHuggingPriority(.required, for: .horizontal)
+        container.backgroundColor = ThemeManager.shared.accentColor.withAlphaComponent(0.10)
+        container.layer.cornerRadius = 12
+        container.isLayoutMarginsRelativeArrangement = true
+        container.layoutMargins = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(statTapped(_:)))
         container.addGestureRecognizer(tap)

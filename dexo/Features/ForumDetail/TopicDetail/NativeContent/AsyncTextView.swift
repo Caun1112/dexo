@@ -65,6 +65,25 @@ final class AsyncTextView: UIView {
         renderIfNeeded()
     }
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) == true else {
+            return
+        }
+        invalidateRendering()
+    }
+
+    /// Forces the cached bitmap to be regenerated for the current appearance.
+    /// This is also used by the topic detail controller when its custom theme
+    /// changes without a UIKit trait transition.
+    func invalidateRendering() {
+        lastRenderedSize = .zero
+        lastRenderedScale = 0
+        renderToken = nil
+        layer.contents = nil
+        setNeedsLayout()
+    }
+
     private func renderIfNeeded() {
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
@@ -78,7 +97,10 @@ final class AsyncTextView: UIView {
     private func scheduleRender(size: CGSize, scale: CGFloat) {
         let token = UUID()
         renderToken = token
-        let attr = attributedText
+        // UIColor's dynamic colors are resolved on the background queue using
+        // that queue's trait environment, which can otherwise default to light
+        // mode. Resolve them while the view still has the correct traits.
+        let attr = resolvedAttributedString(attributedText, for: traitCollection)
         Self.renderQueue.async { [weak self] in
             let format = UIGraphicsImageRendererFormat()
             format.scale = scale
@@ -97,5 +119,24 @@ final class AsyncTextView: UIView {
                 self.layer.contentsScale = scale
             }
         }
+    }
+
+    private func resolvedAttributedString(_ source: NSAttributedString, for traits: UITraitCollection) -> NSAttributedString {
+        let result = NSMutableAttributedString(attributedString: source)
+        let colorKeys: [NSAttributedString.Key] = [
+            .foregroundColor,
+            .backgroundColor,
+            .strokeColor,
+            .underlineColor,
+            .strikethroughColor,
+        ]
+        let fullRange = NSRange(location: 0, length: source.length)
+        source.enumerateAttributes(in: fullRange) { attributes, range, _ in
+            for key in colorKeys {
+                guard let color = attributes[key] as? UIColor else { continue }
+                result.addAttribute(key, value: color.resolvedColor(with: traits), range: range)
+            }
+        }
+        return result
     }
 }
