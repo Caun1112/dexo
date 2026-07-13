@@ -121,7 +121,7 @@ extension UserPostsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let post = viewModel.searchResults[indexPath.row]
-        let detailVC = TopicDetailViewController(api: api, topicId: post.topicId, initialFloor: post.postNumber)
+        let detailVC = TopicDetailControllerFactory.make(api: api, topicId: post.topicId, initialFloor: post.postNumber)
         navigationController?.pushViewController(detailVC, animated: true)
     }
 

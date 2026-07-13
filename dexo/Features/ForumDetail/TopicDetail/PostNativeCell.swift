@@ -150,7 +150,7 @@ final class TreeLineView: UIView {
     }
 }
 
-final class PostNativeCell: UITableViewCell {
+final class PostNativeCell: UITableViewCell, TopicPostIDProviding {
     static let reuseIdentifier = "PostNativeCell"
     static let headerHeight: CGFloat = 44
     static let bottomBarHeight: CGFloat = 30
@@ -210,6 +210,7 @@ final class PostNativeCell: UITableViewCell {
 
     weak var delegate: PostCellDelegate?
     private(set) var postId: Int = 0
+    var renderedPostId: Int { postId }
     /// Tracks which post's content views are currently rendered in contentStackView.
     /// Kept separate from `postId` so prepareForReuse can reset metadata without
     /// forcing a full content rebuild on the next configure call.

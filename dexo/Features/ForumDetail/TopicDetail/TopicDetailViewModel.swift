@@ -27,6 +27,9 @@ struct PendingChildLoad {
 final class TopicDetailViewModel {
     var topic: DiscourseTopicDetail?
     var parsedBlocks: [Int: [AnnotatedBlock]] = [:]
+    /// Immutable documents produced off the main actor. The legacy renderer
+    /// consumes `annotatedBlocks`; the virtualized renderer consumes `units`.
+    private(set) var renderDocuments: [Int: PostRenderDocument] = [:]
     var isLoading = false
     var isReady = false
     var isLoadingMore = false
@@ -343,7 +346,11 @@ final class TopicDetailViewModel {
     /// the server returned the standard `post_stream` layout (PMs and other
     /// archetypes that aren't tree-rendered). We populate the same state
     /// `loadTopic` would have and flip `isTreeMode` off so the UI follows.
-    private func ingestFlatTopic(_ detail: DiscourseTopicDetail, containerWidth: CGFloat) {
+    private func ingestFlatTopic(
+        _ detail: DiscourseTopicDetail,
+        containerWidth: CGFloat,
+        expectedGeneration: UInt
+    ) async {
         isTreeMode = false
         topic = detail
         allPostIds = detail.postStream.stream ?? detail.postStream.posts.map(\.id)
@@ -363,9 +370,8 @@ final class TopicDetailViewModel {
         } else {
             loadedRangeEnd = detail.postStream.posts.count
         }
-        for post in detail.postStream.posts {
-            parseAndStore(post: post)
-        }
+        await parseAndStore(posts: detail.postStream.posts, expectedGeneration: expectedGeneration)
+        guard loadGeneration == expectedGeneration else { return }
         if isReady { isReady = false }
         isReady = true
     }
@@ -375,12 +381,13 @@ final class TopicDetailViewModel {
     /// can find them. Each stored copy has its `children` link cleared to
     /// avoid carrying around two views of the same data — the tree shape lives
     /// in `nestedTreeRoots`, the per-post data lives in `postsById`.
-    private func ingestNested(_ post: DiscourseTopicDetail.Post) {
+    private func ingestNested(_ post: DiscourseTopicDetail.Post, collected: inout [DiscourseTopicDetail.Post]) {
         var bare = post
         bare.children = nil
-        parseAndStore(post: bare)
+        postsById[bare.id] = bare
+        collected.append(bare)
         for child in post.children ?? [] {
-            ingestNested(child)
+            ingestNested(child, collected: &collected)
         }
     }
 
@@ -408,10 +415,12 @@ final class TopicDetailViewModel {
             // defends against duplicates if the server pages overlap).
             let existingIds = Set((nestedTreeRoots ?? []).map(\.id))
             let newRoots = response.roots.filter { !existingIds.contains($0.id) }
+            var postsToParse: [DiscourseTopicDetail.Post] = []
             for root in newRoots {
-                ingestNested(root)
+                ingestNested(root, collected: &postsToParse)
                 collectIds(in: root, into: &added)
             }
+            await parseAndStore(posts: postsToParse)
             nestedTreeRoots = (nestedTreeRoots ?? []) + newRoots
             nestedHasMoreRoots = response.hasMoreRoots
             nestedRootsPage = response.page
@@ -483,10 +492,12 @@ final class TopicDetailViewModel {
             guard loadGeneration == capturedGeneration else { return [] }
 
             var added: [Int] = []
+            var postsToParse: [DiscourseTopicDetail.Post] = []
             for child in response.children {
-                ingestNested(child)
+                ingestNested(child, collected: &postsToParse)
                 collectIds(in: child, into: &added)
             }
+            await parseAndStore(posts: postsToParse)
 
             var roots = nestedTreeRoots ?? []
             // Page 0 is the authoritative first page (it re-includes the
@@ -559,10 +570,12 @@ final class TopicDetailViewModel {
         lastLoadError = nil
         loadMoreFailed = false
         parsedBlocks = [:]
+        renderDocuments = [:]
         postsById = [:]
         let isNewTopic = lastLoadedTopicId != id
         lastLoadedTopicId = id
         loadGeneration &+= 1
+        let expectedGeneration = loadGeneration
         if isNewTopic {
             firstPost = nil
         }
@@ -579,11 +592,17 @@ final class TopicDetailViewModel {
         // routes the same way as the real slug. No slug lookup needed.
         do {
             let response = try await api.fetchNestedTopic(id: id, slug: nil, sort: effectiveSort)
+            guard loadGeneration == expectedGeneration else { return }
             // Some archetypes (notably private messages) bypass the nested
             // view and return the standard flat post-stream off `/n/...`.
             // Pivot into flat rendering instead of failing the load.
             if let flat = response.flatTopic {
-                ingestFlatTopic(flat, containerWidth: containerWidth ?? 0)
+                await ingestFlatTopic(
+                    flat,
+                    containerWidth: containerWidth ?? 0,
+                    expectedGeneration: expectedGeneration
+                )
+                guard loadGeneration == expectedGeneration else { return }
                 isLoading = false
                 return
             }
@@ -602,10 +621,13 @@ final class TopicDetailViewModel {
 
             // Walk the tree and stuff every node into `postsById` + parsed
             // blocks so cell render paths key by ID just like flat mode.
-            ingestNested(opPost)
+            var postsToParse: [DiscourseTopicDetail.Post] = []
+            ingestNested(opPost, collected: &postsToParse)
             for root in response.roots {
-                ingestNested(root)
+                ingestNested(root, collected: &postsToParse)
             }
+            await parseAndStore(posts: postsToParse, expectedGeneration: expectedGeneration)
+            guard loadGeneration == expectedGeneration else { return }
 
             // Synthesize a topic object so consumers that read tags / titles
             // off `viewModel.topic` keep working. `validReactions` isn't on
@@ -639,11 +661,13 @@ final class TopicDetailViewModel {
             if isReady { isReady = false }
             isReady = true
         } catch {
+            guard loadGeneration == expectedGeneration else { return }
             debugLog("[TopicDetail] Nested load failed: \(error)")
             errorMessage = error.localizedDescription
             lastLoadError = error
         }
 
+        guard loadGeneration == expectedGeneration else { return }
         isLoading = false
     }
 
@@ -732,14 +756,14 @@ final class TopicDetailViewModel {
     /// even when the server's nested view hasn't caught up to it yet or would
     /// have paginated it out of the current root window.
     @discardableResult
-    func insertReplyIntoTree(_ post: DiscourseTopicDetail.Post, parentId: Int?) -> Bool {
+    func insertReplyIntoTree(_ post: DiscourseTopicDetail.Post, parentId: Int?) async -> Bool {
         guard isTreeMode, nestedTreeRoots != nil else { return false }
 
         // Leaf node — store a bare copy in the id-keyed maps, matching how
         // `ingestNested` keeps tree shape out of `postsById`.
         var leaf = post
         leaf.children = nil
-        parseAndStore(post: leaf)
+        await parseAndStore(posts: [leaf])
 
         var roots = nestedTreeRoots ?? []
         if let parentId, parentId != nestedTreeOpPost?.id,
@@ -818,10 +842,12 @@ final class TopicDetailViewModel {
         lastLoadError = nil
         loadMoreFailed = false
         parsedBlocks = [:]
+        renderDocuments = [:]
         postsById = [:]
         let isNewTopic = lastLoadedTopicId != id
         lastLoadedTopicId = id
         loadGeneration &+= 1
+        let expectedGeneration = loadGeneration
         // Different topic = different OP; drop any cached value so we don't
         // carry the previous topic's OP into this one. Same-topic reloads
         // (summary toggle, post-reply refresh) leave it alone — preserved
@@ -832,6 +858,7 @@ final class TopicDetailViewModel {
         let filter = isSummaryMode ? "summary" : nil
         do {
             let detail = try await api.fetchTopic(id: id, nearPostNumber: nearPostNumber, filter: filter)
+            guard loadGeneration == expectedGeneration else { return }
             topic = detail
 
             // Save the full stream of post IDs
@@ -871,9 +898,8 @@ final class TopicDetailViewModel {
             }
 
             // Parse all posts with annotated blocks
-            for post in postsToRender {
-                parseAndStore(post: post)
-            }
+            await parseAndStore(posts: postsToRender, expectedGeneration: expectedGeneration)
+            guard loadGeneration == expectedGeneration else { return }
 
             // Force updateUI to re-run even if isReady was already true.
             // Upstream mutations (topic, parsedBlocks, etc.) only fire the first
@@ -884,11 +910,13 @@ final class TopicDetailViewModel {
             }
             isReady = true
         } catch {
+            guard loadGeneration == expectedGeneration else { return }
             debugLog("[TopicDetail] Load failed: \(error)")
             errorMessage = error.localizedDescription
             lastLoadError = error
         }
 
+        guard loadGeneration == expectedGeneration else { return }
         isLoading = false
     }
 
@@ -928,6 +956,7 @@ final class TopicDetailViewModel {
         loadGeneration &+= 1
         topic?.postStream.posts.removeAll()
         parsedBlocks.removeAll()
+        renderDocuments.removeAll()
         postsById.removeAll()
         loadedPostIds.removeAll()
 
@@ -937,10 +966,8 @@ final class TopicDetailViewModel {
             let sortedPosts = response.postStream.posts.sorted { (idOrder[$0.id] ?? 0) < (idOrder[$1.id] ?? 0) }
 
             topic?.postStream.posts = sortedPosts
-            for post in sortedPosts {
-                loadedPostIds.insert(post.id)
-                parseAndStore(post: post)
-            }
+            for post in sortedPosts { loadedPostIds.insert(post.id) }
+            await parseAndStore(posts: sortedPosts)
             if let op = sortedPosts.first(where: { $0.postNumber == 1 }) {
                 firstPost = op
             }
@@ -955,6 +982,10 @@ final class TopicDetailViewModel {
 
         if isReady { isReady = false }
         isReady = true
+    }
+
+    func disableReverseOrder() {
+        isReverseOrder = false
     }
 
     /// Appends the next batch of posts at the end of the loaded window.
@@ -995,10 +1026,8 @@ final class TopicDetailViewModel {
         let idOrder = Dictionary(uniqueKeysWithValues: allPostIds.enumerated().map { ($1, $0) })
         let sortedPosts = newPosts.sorted { (idOrder[$0.id] ?? 0) < (idOrder[$1.id] ?? 0) }
         topic?.postStream.posts.append(contentsOf: sortedPosts)
-        for post in sortedPosts {
-            loadedPostIds.insert(post.id)
-            parseAndStore(post: post)
-        }
+        for post in sortedPosts { loadedPostIds.insert(post.id) }
+        await parseAndStore(posts: sortedPosts)
         loadedRangeEnd = newEnd
         return sortedPosts.map(\.id)
     }
@@ -1046,10 +1075,8 @@ final class TopicDetailViewModel {
             insertIndex = 0
         }
         topic?.postStream.posts.insert(contentsOf: sortedPosts, at: insertIndex)
-        for post in sortedPosts {
-            loadedPostIds.insert(post.id)
-            parseAndStore(post: post)
-        }
+        for post in sortedPosts { loadedPostIds.insert(post.id) }
+        await parseAndStore(posts: sortedPosts)
         loadedRangeStart = newStart
         return sortedPosts.map(\.id)
     }
@@ -1075,6 +1102,7 @@ final class TopicDetailViewModel {
         // reaches the table view.
         topic?.postStream.posts.removeAll()
         parsedBlocks.removeAll()
+        renderDocuments.removeAll()
         postsById.removeAll()
         loadedPostIds.removeAll()
         // Intentionally keep `firstPost`: the OP doesn't change when jumping
@@ -1088,10 +1116,8 @@ final class TopicDetailViewModel {
             let idOrder = Dictionary(uniqueKeysWithValues: allPostIds.enumerated().map { ($1, $0) })
             let sortedPosts = response.postStream.posts.sorted { (idOrder[$0.id] ?? 0) < (idOrder[$1.id] ?? 0) }
             topic?.postStream.posts = sortedPosts
-            for post in sortedPosts {
-                loadedPostIds.insert(post.id)
-                parseAndStore(post: post)
-            }
+            for post in sortedPosts { loadedPostIds.insert(post.id) }
+            await parseAndStore(posts: sortedPosts)
             // If the jump landed on the very first batch, refresh the cache
             // from the freshly-loaded post 1.
             if let op = sortedPosts.first, op.postNumber == 1 {
@@ -1150,7 +1176,7 @@ final class TopicDetailViewModel {
     /// cache stays valid. Plugin-only fields that the bare `/posts/{id}.json`
     /// endpoint doesn't return (boosts, polls votes) are carried over from the
     /// existing post so the UI doesn't lose state.
-    func replacePost(_ updated: DiscourseTopicDetail.Post) {
+    func replacePost(_ updated: DiscourseTopicDetail.Post) async {
         guard var topic else { return }
         guard let index = topic.postStream.posts.firstIndex(where: { $0.id == updated.id }) else { return }
         let existing = topic.postStream.posts[index]
@@ -1170,11 +1196,11 @@ final class TopicDetailViewModel {
         self.topic = topic
         postsById[merged.id] = merged
         if cookedChanged {
-            parsedBlocks[merged.id] = CookedHTMLParser.parseAnnotated(html: merged.cooked, baseURL: api.baseURL)
+            await parseAndStore(posts: [merged])
         }
     }
 
-    func updatePoll(_ updatedPoll: DiscourseTopicDetail.Poll, votes: [String], forPostId postId: Int, pollName: String) {
+    func updatePoll(_ updatedPoll: DiscourseTopicDetail.Poll, votes: [String], forPostId postId: Int, pollName: String) async {
         guard var topic else { return }
         guard let postIndex = topic.postStream.posts.firstIndex(where: { $0.id == postId }) else { return }
         if let pollIndex = topic.postStream.posts[postIndex].polls.firstIndex(where: { $0.name == pollName }) {
@@ -1183,14 +1209,21 @@ final class TopicDetailViewModel {
         topic.postStream.posts[postIndex].pollsVotes[pollName] = votes
         self.topic = topic
         // Re-parse to trigger UI update
-        parseAndStore(post: topic.postStream.posts[postIndex])
+        await parseAndStore(posts: [topic.postStream.posts[postIndex]])
     }
 
     // MARK: - Private
 
-    private func parseAndStore(post: DiscourseTopicDetail.Post) {
-        let annotated = CookedHTMLParser.parseAnnotated(html: post.cooked, baseURL: api.baseURL)
-        parsedBlocks[post.id] = annotated
-        postsById[post.id] = post
+    private func parseAndStore(posts: [DiscourseTopicDetail.Post], expectedGeneration: UInt? = nil) async {
+        guard !posts.isEmpty else { return }
+        let inputs = posts.map { PostRenderInput(postId: $0.id, cookedHTML: $0.cooked) }
+        let documents = await TopicRenderPipeline.shared.renderDocuments(inputs: inputs, baseURL: api.baseURL)
+        if let expectedGeneration, loadGeneration != expectedGeneration { return }
+        for post in posts {
+            guard let document = documents[post.id] else { continue }
+            parsedBlocks[post.id] = document.annotatedBlocks
+            renderDocuments[post.id] = document
+            postsById[post.id] = post
+        }
     }
 }

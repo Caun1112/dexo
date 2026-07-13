@@ -60,6 +60,8 @@ final class BoostCell: UITableViewCell {
         assetBaseURL: String,
         contentWidth: CGFloat
     ) {
+        backgroundColor = ThemeManager.shared.cardBackgroundColor
+        contentView.backgroundColor = ThemeManager.shared.cardBackgroundColor
         let boosts = post.boosts
         clearRows()
 

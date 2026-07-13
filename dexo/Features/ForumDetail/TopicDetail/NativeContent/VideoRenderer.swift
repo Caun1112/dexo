@@ -32,9 +32,11 @@ final class VideoCardView: UIView {
     weak var delegate: PostCellDelegate?
     private let videoURL: String
     private let thumbnailImageView = UIImageView()
+    private let thumbnailURL: URL?
 
     init(url: String, thumbnailURL: String?, title: String?, width: Int?, height: Int?, containerWidth: CGFloat) {
         self.videoURL = url
+        self.thumbnailURL = thumbnailURL.flatMap(URL.init(string:))
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -65,9 +67,7 @@ final class VideoCardView: UIView {
             thumbnailImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
-        if let thumbnailURL, let thumbURL = URL(string: thumbnailURL) {
-            thumbnailImageView.sd_setImage(with: thumbURL, context: ImageCacheManager.shared.contentContext)
-        }
+        startThumbnailLoad()
 
         // Play button with shadow for contrast on any background
         let playButton = UIImageView()
@@ -150,5 +150,15 @@ final class VideoCardView: UIView {
 
     func cancelImageLoad() {
         thumbnailImageView.sd_cancelCurrentImageLoad()
+    }
+
+    private func startThumbnailLoad() {
+        guard thumbnailImageView.image == nil, let thumbnailURL else { return }
+        thumbnailImageView.sd_setImage(with: thumbnailURL, context: ImageCacheManager.shared.contentContext)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { startThumbnailLoad() }
     }
 }

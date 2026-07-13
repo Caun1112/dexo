@@ -80,6 +80,7 @@ enum NativeContentRenderer {
         VideoRenderer.self,
         TableRenderer.self,
         PollRenderer.self,
+        RawHTMLRenderer.self,
     ]
 
     static func renderBlocks(

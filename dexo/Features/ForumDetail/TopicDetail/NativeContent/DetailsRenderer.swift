@@ -15,11 +15,13 @@ enum DetailsRenderer: BlockRenderer {
 
 // MARK: - DetailsCardView
 
-private class DetailsCardView: UIView {
+final class DetailsCardView: UIView {
+    static let intrinsicHeightDidChangeNotification = Notification.Name("TopicDetailsHeightDidChange")
     private let chevron = UIImageView()
     private let headerView = UIView()
     private var contentStack: UIStackView?
     private var isExpanded = false
+    var onExpansionChange: ((Bool) -> Void)?
     private var headerBottomConstraint: NSLayoutConstraint!
     private var contentBottomConstraint: NSLayoutConstraint?
 
@@ -98,7 +100,12 @@ private class DetailsCardView: UIView {
     }
 
     @objc private func toggleExpanded() {
-        isExpanded.toggle()
+        setExpanded(!isExpanded, notify: true)
+    }
+
+    func setExpanded(_ expanded: Bool, notify: Bool = false) {
+        guard expanded != isExpanded else { return }
+        isExpanded = expanded
 
         if isExpanded {
             // Lazily create and add the content stack
@@ -134,8 +141,10 @@ private class DetailsCardView: UIView {
         }
 
         chevron.transform = isExpanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity
-
         invalidateIntrinsicContentSize()
+        guard notify else { return }
+        onExpansionChange?(isExpanded)
+        NotificationCenter.default.post(name: Self.intrinsicHeightDidChangeNotification, object: self)
         if let tableView = findTableView() {
             let offset = tableView.contentOffset
             tableView.beginUpdates()

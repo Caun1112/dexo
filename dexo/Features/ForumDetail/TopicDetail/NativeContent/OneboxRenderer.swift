@@ -35,9 +35,13 @@ final class OneboxCardView: UIView {
     private let sourceURL: String?
     private let imageView = UIImageView()
     private let faviconView = UIImageView()
+    private let contentImageURL: URL?
+    private let faviconImageURL: URL?
 
     init(sourceURL: String?, title: String?, description: String?, imageURL: String?, imageWidth: Int?, imageHeight: Int?, faviconURL: String?, containerWidth: CGFloat) {
         self.sourceURL = sourceURL
+        contentImageURL = imageURL.flatMap(URL.init(string:))
+        faviconImageURL = faviconURL.flatMap(URL.init(string:))
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -67,8 +71,7 @@ final class OneboxCardView: UIView {
         faviconView.layer.cornerRadius = 2
         let faviconSize: CGFloat = 16
 
-        if let faviconURL, let url = URL(string: faviconURL) {
-            faviconView.sd_setImage(with: url, context: ImageCacheManager.shared.contentContext)
+        if faviconImageURL != nil {
             headerStack.addArrangedSubview(faviconView)
             NSLayoutConstraint.activate([
                 faviconView.widthAnchor.constraint(equalToConstant: faviconSize),
@@ -150,7 +153,7 @@ final class OneboxCardView: UIView {
         }
 
         // Thumbnail image (only for actual content images, not favicons)
-        if let imageURL, let url = URL(string: imageURL) {
+        if contentImageURL != nil {
             imageView.translatesAutoresizingMaskIntoConstraints = false
             imageView.contentMode = .scaleAspectFill
             imageView.clipsToBounds = true
@@ -178,10 +181,9 @@ final class OneboxCardView: UIView {
             ])
 
             bodyStack.addArrangedSubview(imageWrapper)
-            imageView.sd_setImage(with: url, placeholderImage: nil, options: [], context: ImageCacheManager.shared.contentContext, progress: nil) { [weak self] _, _, _, _ in
-                self?.imageView.backgroundColor = .clear
-            }
         }
+
+        startImageLoads()
 
         // Tap gesture
         let tap = UITapGestureRecognizer(target: self, action: #selector(cardTapped))
@@ -202,5 +204,21 @@ final class OneboxCardView: UIView {
     func cancelImageLoad() {
         imageView.sd_cancelCurrentImageLoad()
         faviconView.sd_cancelCurrentImageLoad()
+    }
+
+    private func startImageLoads() {
+        if let faviconImageURL, faviconView.image == nil {
+            faviconView.sd_setImage(with: faviconImageURL, context: ImageCacheManager.shared.contentContext)
+        }
+        if let contentImageURL, imageView.image == nil {
+            imageView.sd_setImage(with: contentImageURL, placeholderImage: nil, options: [], context: ImageCacheManager.shared.contentContext, progress: nil) { [weak self] _, _, _, _ in
+                self?.imageView.backgroundColor = .clear
+            }
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { startImageLoads() }
     }
 }

@@ -9,7 +9,7 @@ import UIKit
 /// directly visible as a frame hitch.
 ///
 /// `AsyncTextView` rasterizes the attributed string to a `UIImage` on a
-/// concurrent background queue (using `UIGraphicsImageRenderer` +
+/// serial background queue (using `UIGraphicsImageRenderer` +
 /// `NSAttributedString.draw(in:)` — both documented thread-safe), then
 /// assigns the resulting `cgImage` to `layer.contents` on the main thread.
 /// The main-thread cost reduces to view instantiation + a layer assignment,
@@ -31,14 +31,14 @@ import UIKit
 final class AsyncTextView: UIView {
     private static let renderQueue = DispatchQueue(
         label: "AsyncTextView.render",
-        qos: .userInitiated,
-        attributes: .concurrent
+        qos: .userInitiated
     )
 
     private let attributedText: NSAttributedString
     private var lastRenderedSize: CGSize = .zero
     private var lastRenderedScale: CGFloat = 0
     private var renderToken: UUID?
+    private var cancellationToken: AsyncRenderCancellationToken?
 
     init(attributedString: NSAttributedString) {
         self.attributedText = attributedString
@@ -62,6 +62,17 @@ final class AsyncTextView: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        if window == nil {
+            // A queued render no longer benefits an off-screen/cached view.
+            // Reset the size marker only when work was active so a reattached
+            // view retries instead of remaining blank after cancellation.
+            if cancellationToken != nil {
+                cancelPendingRender()
+                lastRenderedSize = .zero
+                lastRenderedScale = 0
+            }
+            return
+        }
         renderIfNeeded()
     }
 
@@ -77,9 +88,9 @@ final class AsyncTextView: UIView {
     /// This is also used by the topic detail controller when its custom theme
     /// changes without a UIKit trait transition.
     func invalidateRendering() {
+        cancelPendingRender()
         lastRenderedSize = .zero
         lastRenderedScale = 0
-        renderToken = nil
         layer.contents = nil
         setNeedsLayout()
     }
@@ -95,30 +106,51 @@ final class AsyncTextView: UIView {
     }
 
     private func scheduleRender(size: CGSize, scale: CGFloat) {
+        cancelPendingRender()
         let token = UUID()
+        let cancellation = AsyncRenderCancellationToken()
         renderToken = token
+        cancellationToken = cancellation
         // UIColor's dynamic colors are resolved on the background queue using
         // that queue's trait environment, which can otherwise default to light
         // mode. Resolve them while the view still has the correct traits.
         let attr = resolvedAttributedString(attributedText, for: traitCollection)
         Self.renderQueue.async { [weak self] in
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = scale
-            format.opaque = false
-            let renderer = UIGraphicsImageRenderer(size: size, format: format)
-            let image = renderer.image { _ in
-                attr.draw(
-                    with: CGRect(origin: .zero, size: size),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading],
-                    context: nil
-                )
+            guard !cancellation.isCancelled else { return }
+            let image: UIImage? = autoreleasepool {
+                guard !cancellation.isCancelled else { return nil }
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = scale
+                format.opaque = false
+                let renderer = UIGraphicsImageRenderer(size: size, format: format)
+                let rendered = renderer.image { _ in
+                    guard !cancellation.isCancelled else { return }
+                    attr.draw(
+                        with: CGRect(origin: .zero, size: size),
+                        options: [.usesLineFragmentOrigin, .usesFontLeading],
+                        context: nil
+                    )
+                }
+                return cancellation.isCancelled ? nil : rendered
             }
+            guard let image else { return }
             DispatchQueue.main.async {
-                guard let self, self.renderToken == token else { return }
+                guard let self,
+                      !cancellation.isCancelled,
+                      self.renderToken == token,
+                      self.cancellationToken === cancellation
+                else { return }
                 self.layer.contents = image.cgImage
                 self.layer.contentsScale = scale
+                self.cancellationToken = nil
             }
         }
+    }
+
+    private func cancelPendingRender() {
+        cancellationToken?.cancel()
+        cancellationToken = nil
+        renderToken = nil
     }
 
     private func resolvedAttributedString(_ source: NSAttributedString, for traits: UITraitCollection) -> NSAttributedString {
@@ -138,5 +170,24 @@ final class AsyncTextView: UIView {
             }
         }
         return result
+    }
+}
+
+/// Lock-backed because cancellation is requested on the main actor and read
+/// from the background render queue.
+private nonisolated final class AsyncRenderCancellationToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
     }
 }

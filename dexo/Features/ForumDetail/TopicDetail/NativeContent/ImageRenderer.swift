@@ -2,9 +2,27 @@ import CookedHTML
 import SDWebImage
 import UIKit
 
+protocol TopicPostIDProviding: AnyObject {
+    var renderedPostId: Int { get }
+}
+
+enum TopicPostIDResolver {
+    static func postId(startingAt view: UIView?) -> Int {
+        var current = view
+        while let candidate = current {
+            if let provider = candidate as? TopicPostIDProviding {
+                return provider.renderedPostId
+            }
+            current = candidate.superview
+        }
+        return 0
+    }
+}
+
 // MARK: - TappableImageContainer
 
 final class TappableImageContainer: UIView {
+    static let intrinsicHeightDidChangeNotification = Notification.Name("TopicContentImageHeightDidChange")
     /// URL used when tapped — prefers the full-size href over the img src.
     var imageURL: URL?
     weak var delegate: PostCellDelegate?
@@ -16,6 +34,9 @@ final class TappableImageContainer: UIView {
     /// Exposed for zoom transition animations.
     var displayedImageView: UIImageView { imageView }
     private let imageView: UIImageView
+    private let sourceURL: URL
+    private let containerWidth: CGFloat
+    private let hasOriginalSize: Bool
 
     private var imageHeightConstraint: NSLayoutConstraint!
     private var imageWidthConstraint: NSLayoutConstraint!
@@ -29,6 +50,9 @@ final class TappableImageContainer: UIView {
     }
 
     init(url: URL, width: Int?, height: Int?, containerWidth: CGFloat, href: URL? = nil) {
+        sourceURL = url
+        self.containerWidth = containerWidth
+        hasOriginalSize = width != nil && height != nil
         imageURL = href ?? url
         let iv: UIImageView = Self.isLikelyAnimated(url) ? SDAnimatedImageView() : UIImageView()
         iv.contentMode = .scaleAspectFill
@@ -81,20 +105,22 @@ final class TappableImageContainer: UIView {
         // Pause GIF animation by default; resumed when visible on screen
         (imageView as? SDAnimatedImageView)?.autoPlayAnimatedImage = false
 
-        let hasOriginalSize = width != nil && height != nil
-
-        imageView.sd_setImage(with: url, placeholderImage: nil, options: [], context: ImageCacheManager.shared.contentContext, progress: nil) { [weak self] image, _, _, _ in
-            guard let self, let image else { return }
-            if !hasOriginalSize {
-                let ratio = containerWidth / image.size.width
-                self.imageHeightConstraint.constant = image.size.height * ratio
-                self.scheduleCoalescedHeightUpdate()
-            }
-        }
+        startImageLoad()
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(imageTapped))
         addGestureRecognizer(tap)
         isUserInteractionEnabled = true
+    }
+
+    private func startImageLoad() {
+        imageView.sd_setImage(with: sourceURL, placeholderImage: nil, options: [], context: ImageCacheManager.shared.contentContext, progress: nil) { [weak self] image, _, _, _ in
+            guard let self, let image else { return }
+            if !self.hasOriginalSize, image.size.width > 0 {
+                let ratio = self.containerWidth / image.size.width
+                self.imageHeightConstraint.constant = image.size.height * ratio
+                self.scheduleCoalescedHeightUpdate()
+            }
+        }
     }
 
     @available(*, unavailable)
@@ -113,12 +139,7 @@ final class TappableImageContainer: UIView {
     }
 
     private func findPostId() -> Int {
-        var view: UIView? = superview
-        while let v = view {
-            if let cell = v as? PostNativeCell { return cell.postId }
-            view = v.superview
-        }
-        return 0
+        TopicPostIDResolver.postId(startingAt: superview)
     }
 
     func cancelImageLoad() {
@@ -133,6 +154,12 @@ final class TappableImageContainer: UIView {
     private static var pendingUpdateTableViews = Set<ObjectIdentifier>()
 
     private func scheduleCoalescedHeightUpdate() {
+        let postId = findPostId()
+        NotificationCenter.default.post(
+            name: Self.intrinsicHeightDidChangeNotification,
+            object: self,
+            userInfo: postId == 0 ? nil : ["postId": postId]
+        )
         guard let tableView = findTableView() else { return }
         let id = ObjectIdentifier(tableView)
         guard !Self.pendingUpdateTableViews.contains(id) else { return }
@@ -174,6 +201,7 @@ final class TappableImageContainer: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil {
+            if imageView.image == nil { startImageLoad() }
             imageView.startAnimating()
         } else {
             imageView.stopAnimating()

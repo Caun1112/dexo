@@ -209,7 +209,7 @@ final class HomeViewController: ObservableViewController {
         tableView.tableHeaderView = emptyHeaderPlaceholder
         pinnedBar.onSelect = { [weak self] topicId in
             guard let self else { return }
-            let detailVC = TopicDetailViewController(api: self.api, topicId: topicId)
+            let detailVC = TopicDetailControllerFactory.make(api: self.api, topicId: topicId)
             self.navigationController?.pushViewController(detailVC, animated: true)
         }
         view.addSubview(tableView)
@@ -564,7 +564,7 @@ extension HomeViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let topicId = dataSource.itemIdentifier(for: indexPath) else { return }
-        let detailVC = TopicDetailViewController(api: api, topicId: topicId)
+        let detailVC = TopicDetailControllerFactory.make(api: api, topicId: topicId)
         navigationController?.pushViewController(detailVC, animated: true)
     }
 
@@ -572,12 +572,12 @@ extension HomeViewController: UITableViewDelegate {
         guard let topicId = dataSource.itemIdentifier(for: indexPath) else { return nil }
         return UIContextMenuConfiguration(identifier: topicId as NSCopying, previewProvider: { [weak self] in
             guard let self else { return nil }
-            return TopicDetailViewController(api: self.api, topicId: topicId)
+            return TopicDetailControllerFactory.make(api: self.api, topicId: topicId)
         })
     }
 
     func tableView(_ tableView: UITableView, willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration, animator: any UIContextMenuInteractionCommitAnimating) {
-        guard let detailVC = animator.previewViewController as? TopicDetailViewController else { return }
+        guard let detailVC = animator.previewViewController else { return }
         animator.addCompletion { [weak self] in
             self?.navigationController?.pushViewController(detailVC, animated: true)
         }

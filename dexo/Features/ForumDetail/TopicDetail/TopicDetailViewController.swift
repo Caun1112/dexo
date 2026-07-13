@@ -105,6 +105,7 @@ nonisolated final class TopicReadTracker {
 
 // MARK: - Frame Drop Detector (temporary perf debugging)
 final class FrameDropDetector {
+#if DEBUG
     private var displayLink: CADisplayLink?
     private var lastTimestamp: CFTimeInterval = 0
     /// Collects [PERF] messages between frames; flushed only when a drop is detected.
@@ -144,9 +145,15 @@ final class FrameDropDetector {
             }
         }
     }
+#else
+    static let shared = FrameDropDetector()
+    func start() {}
+    func stop() {}
+    func log(_ message: String) {}
+#endif
 }
 
-final class TopicDetailViewController: ObservableViewController {
+final class LegacyTopicDetailViewController: ObservableViewController {
     private let viewModel: TopicDetailViewModel
     private let api: DiscourseAPI
     private let topicId: Int
@@ -157,7 +164,9 @@ final class TopicDetailViewController: ObservableViewController {
     private var lastScrollOffset: CGFloat = 0
     /// VC-level cache of rendered content views keyed by post ID.
     /// Avoids re-creating the entire view tree when scrolling back to a post.
-    private var contentViewCache: [Int: [UIView]] = [:]
+    /// Legacy-only cache. Keeping it bounded is essential now that a cached
+    /// AsyncTextView can retain a multi-megabyte bitmap.
+    private let contentViewCache = LRUCache<Int, [UIView]>(capacity: 18)
     /// Tracks whether a pagination flow (jump, load-earlier, load-more, reverse,
     /// summary) is currently in flight. `updateUI` defers snapshot application
     /// while non-`.idle` so the flow's own synchronous apply isn't fought by
@@ -229,6 +238,7 @@ final class TopicDetailViewController: ObservableViewController {
     /// Tracks the table width the cache was computed against. A width change
     /// (rotation, split-view resize) invalidates the entire cache.
     private var precomputedWidth: CGFloat = 0
+    private var renderCacheEnvironment: RenderEnvironment?
     /// Serial background queue that warms `precomputedBlockHeights` /
     /// `precomputedTotalHeights` ahead of cellForRowAt. The synchronous
     /// `precomputeHeights(forPostId:)` in the cell provider is otherwise a
@@ -546,7 +556,9 @@ final class TopicDetailViewController: ObservableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+#if DEBUG
         FrameDropDetector.shared.start()
+#endif
         navigationItem.largeTitleDisplayMode = .never
         title = String(localized: "topic_detail.default_title")
         // Restore the user's preferred reading mode from the previous session
@@ -645,6 +657,14 @@ final class TopicDetailViewController: ObservableViewController {
             self, selector: #selector(topicThemeDidChange),
             name: ThemeManager.themeDidChangeNotification, object: nil
         )
+        nc.addObserver(
+            self, selector: #selector(topicFontDidChange),
+            name: FontManager.fontDidChangeNotification, object: nil
+        )
+        nc.addObserver(
+            self, selector: #selector(topicImageHeightDidChange(_:)),
+            name: TappableImageContainer.intrinsicHeightDidChangeNotification, object: nil
+        )
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -667,6 +687,22 @@ final class TopicDetailViewController: ObservableViewController {
 
     @objc private func topicThemeDidChange() {
         refreshThemeAppearance()
+    }
+
+    @objc private func topicFontDidChange() {
+        invalidateRenderCaches()
+        hasTitleHeader = false
+        tableView.reloadData()
+        updateUI()
+    }
+
+    @objc private func topicImageHeightDidChange(_ notification: Notification) {
+        guard let sender = notification.object as? UIView,
+              sender.isDescendant(of: tableView),
+              let postId = notification.userInfo?["postId"] as? Int
+        else { return }
+        invalidatePrecomputedHeights(forPostId: postId)
+        cellHeightCache.removeValue(forKey: .post(postId))
     }
 
     /// Rebuilds only rendered content, not topic data or height measurements.
@@ -706,6 +742,10 @@ final class TopicDetailViewController: ObservableViewController {
                 currentSnapshot.indexOfItem($0) != NSNotFound
             }
             guard !reloadableItems.isEmpty else { return }
+
+            for indexPath in visibleIndexPaths {
+                (self.tableView.cellForRow(at: indexPath) as? PostNativeCell)?.markContentDirty()
+            }
 
             var refreshedSnapshot = currentSnapshot
             refreshedSnapshot.reloadItems(Array(reloadableItems))
@@ -806,6 +846,23 @@ final class TopicDetailViewController: ObservableViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        let width = tableView.bounds.width
+        if width > 0 {
+            let environment = RenderEnvironment(
+                contentWidth: width,
+                displayScale: view.window?.screen.scale ?? UIScreen.main.scale,
+                fontRevision: FontManager.shared.revision,
+                themeRevision: ThemeManager.shared.revision
+            )
+            if let previous = renderCacheEnvironment, previous != environment {
+                invalidateRenderCaches()
+                for cell in tableView.visibleCells {
+                    (cell as? PostNativeCell)?.markContentDirty()
+                }
+                tableView.reloadData()
+            }
+            renderCacheEnvironment = environment
+        }
         // Reserve bottom space for the floating button row
         let bottomInset: CGFloat = 44 + 12 + 12
         if tableView.contentInset.bottom != bottomInset {
@@ -1020,6 +1077,16 @@ final class TopicDetailViewController: ObservableViewController {
     private func invalidateRenderCaches() {
         cellHeightCache.removeAll()
         contentViewCache.removeAll()
+        precomputedBlockHeights.removeAll()
+        precomputedTotalHeights.removeAll()
+    }
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        contentViewCache.removeAll()
+        // Heights are inexpensive compared with view trees, but clearing them
+        // here guarantees stale environment entries cannot survive pressure.
+        cellHeightCache.removeAll()
         precomputedBlockHeights.removeAll()
         precomputedTotalHeights.removeAll()
     }
@@ -1526,7 +1593,7 @@ final class TopicDetailViewController: ObservableViewController {
 
         if linkHost == baseHost {
             if let topicId = parseTopicId(from: url) {
-                let detailVC = TopicDetailViewController(api: api, topicId: topicId)
+                let detailVC = TopicDetailControllerFactory.make(api: api, topicId: topicId)
                 navigationController?.pushViewController(detailVC, animated: true)
             } else if let (slug, categoryId) = parseCategoryInfo(from: url) {
                 let category = DiscourseCategory(id: categoryId, name: slug, slug: slug)
@@ -1624,7 +1691,7 @@ final class TopicDetailViewController: ObservableViewController {
 
 // MARK: - TopicDetailBottomBarDelegate
 
-extension TopicDetailViewController: TopicDetailBottomBarDelegate {
+extension LegacyTopicDetailViewController: TopicDetailBottomBarDelegate {
     func bottomBarDidTapOPOnly() {
         viewModel.isFilteringByOP.toggle()
     }
@@ -1964,7 +2031,7 @@ extension TopicDetailViewController: TopicDetailBottomBarDelegate {
 
 // MARK: - UITableViewDelegate
 
-extension TopicDetailViewController: UITableViewDelegate {
+extension LegacyTopicDetailViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         // The tree-mode "view more replies" row is a fixed-size compact row.
         if case .loadMoreChildren = dataSource.itemIdentifier(for: indexPath) {
@@ -2408,23 +2475,15 @@ extension TopicDetailViewController: UITableViewDelegate {
 
 // MARK: - PostCellDelegate
 
-extension TopicDetailViewController: PostCellDelegate {
+extension LegacyTopicDetailViewController: PostCellDelegate {
     func postCell(didTapImageURL url: URL, inPostId postId: Int) {
-        var imageURLs: [String] = []
-        if let blocks = viewModel.parsedBlocks[postId] {
-            imageURLs = ImageURLCollector.collectImageURLs(from: blocks)
-        }
-
-        let tappedString = url.absoluteString
-        let startIndex = imageURLs.firstIndex(of: tappedString) ?? 0
-
-        if imageURLs.isEmpty {
-            imageURLs = [tappedString]
-        }
-
-        let images = imageURLs.compactMap { URL(string: $0) }.map { LightboxImage(imageURL: $0) }
+        let request = TopicImageBrowserRequest.make(
+            annotatedBlocks: viewModel.parsedBlocks[postId] ?? [],
+            tappedURL: url
+        )
+        let images = request.imageURLs.map { LightboxImage(imageURL: $0) }
         guard !images.isEmpty else { return }
-        let controller = ImageBrowserController(images: images, startIndex: startIndex)
+        let controller = ImageBrowserController(images: images, startIndex: request.startIndex)
         controller.dynamicBackground = true
 
         if let source = TappableImageContainer.lastTapped {
@@ -2516,7 +2575,7 @@ extension TopicDetailViewController: PostCellDelegate {
     /// post state.
     private func refreshPost(id: Int) async {
         guard let fresh = try? await api.fetchPost(id: id) else { return }
-        viewModel.replacePost(fresh)
+        await viewModel.replacePost(fresh)
         invalidatePrecomputedHeights(forPostId: id)
         var snapshot = dataSource.snapshot()
         let item = TopicDetailItem.post(id)
@@ -2756,7 +2815,7 @@ extension TopicDetailViewController: PostCellDelegate {
                 var spliced = false
                 if let newPost = try? await self.api.fetchPost(id: newPostId) {
                     guard self.paginationTokenIsCurrent(token) else { return }
-                    spliced = self.viewModel.insertReplyIntoTree(newPost, parentId: parentId)
+                    spliced = await self.viewModel.insertReplyIntoTree(newPost, parentId: parentId)
                 }
                 guard self.paginationTokenIsCurrent(token) else { return }
                 if spliced {
@@ -2837,7 +2896,7 @@ extension TopicDetailViewController: PostCellDelegate {
         Task {
             do {
                 let response = try await api.votePoll(postId: post.id, pollName: pollName, options: options)
-                viewModel.updatePoll(response.poll, votes: response.vote ?? options, forPostId: post.id, pollName: pollName)
+                await viewModel.updatePoll(response.poll, votes: response.vote ?? options, forPostId: post.id, pollName: pollName)
                 reconfigurePost(post.id)
             } catch {
                 // TODO: show error
@@ -2849,7 +2908,7 @@ extension TopicDetailViewController: PostCellDelegate {
         Task {
             do {
                 let response = try await api.removePollVote(postId: post.id, pollName: pollName)
-                viewModel.updatePoll(response.poll, votes: response.vote ?? [], forPostId: post.id, pollName: pollName)
+                await viewModel.updatePoll(response.poll, votes: response.vote ?? [], forPostId: post.id, pollName: pollName)
                 reconfigurePost(post.id)
             } catch {
                 // TODO: show error

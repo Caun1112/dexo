@@ -89,7 +89,7 @@ extension SettingsViewController: UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch visibleSections[section] {
-        case .general: return 2
+        case .general: return 3
         case .appearance: return AppearanceRow.allCases.count
         case .storage: return 1
         case .about: return 1
@@ -118,8 +118,10 @@ extension SettingsViewController: UITableViewDataSource {
         case .general:
             if indexPath.row == 0 {
                 return makeAutoOpenCell(tableView, indexPath: indexPath)
-            } else {
+            } else if indexPath.row == 1 {
                 return makeBoostDisplayCell(tableView, indexPath: indexPath)
+            } else {
+                return makeTopicRenderingCell(tableView, indexPath: indexPath)
             }
         case .appearance:
             switch AppearanceRow(rawValue: indexPath.row)! {
@@ -223,6 +225,15 @@ extension SettingsViewController: UITableViewDataSource {
         return cell
     }
 
+    private func makeTopicRenderingCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        applyFonts(to: cell)
+        cell.textLabel?.text = String(localized: "settings.topic_rendering")
+        cell.detailTextLabel?.text = settings.topicRenderingMode.title
+        cell.accessoryType = .disclosureIndicator
+        return cell
+    }
+
     private func makeDohToggleCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
         applyFonts(to: cell)
@@ -293,6 +304,8 @@ extension SettingsViewController: UITableViewDelegate {
         case .general:
             if indexPath.row == 1 {
                 showBoostDisplayPicker(from: sourceView)
+            } else if indexPath.row == 2 {
+                showTopicRenderingPicker(from: sourceView)
             }
         case .appearance:
             switch AppearanceRow(rawValue: indexPath.row)! {
@@ -402,6 +415,29 @@ extension SettingsViewController {
         present(alert, animated: true)
     }
 
+    private func showTopicRenderingPicker(from sourceView: UIView?) {
+        let alert = UIAlertController(
+            title: String(localized: "settings.topic_rendering"),
+            message: String(localized: "settings.topic_rendering.hint"),
+            preferredStyle: .actionSheet
+        )
+        for mode in AppSettings.TopicRenderingMode.allCases {
+            let action = UIAlertAction(title: mode.title, style: .default) { [weak self] _ in
+                self?.settings.topicRenderingMode = mode
+                if let idx = self?.visibleSections.firstIndex(of: .general) {
+                    self?.tableView.reloadSections(IndexSet(integer: idx), with: .none)
+                }
+            }
+            if mode == settings.topicRenderingMode {
+                action.setValue(true, forKey: "checked")
+            }
+            alert.addAction(action)
+        }
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        Self.anchorPopover(alert, to: sourceView)
+        present(alert, animated: true)
+    }
+
     private func showDohProviderPicker(from sourceView: UIView?) {
         let alert = UIAlertController(title: "DoH Provider", message: nil, preferredStyle: .actionSheet)
         for provider in AppSettings.DoHProvider.allCases {
@@ -447,7 +483,7 @@ extension SettingsViewController {
             let scheme = url.scheme ?? "https"
             let baseURL = "\(scheme)://\(host)"
             let api = DiscourseAPI(baseURL: baseURL)
-            let vc = TopicDetailViewController(api: api, topicId: topicId)
+            let vc = TopicDetailControllerFactory.make(api: api, topicId: topicId)
             self.navigationController?.pushViewController(vc, animated: true)
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))

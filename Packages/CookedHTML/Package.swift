@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "CookedHTML",
     platforms: [
-        .iOS(.v15),
+        .iOS(.v16),
         .macOS(.v12),
     ],
     products: [

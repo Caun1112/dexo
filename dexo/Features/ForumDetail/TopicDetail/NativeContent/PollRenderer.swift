@@ -32,6 +32,7 @@ final class PollView: UIView {
     private let post: DiscourseTopicDetail.Post
     private let containerWidth: CGFloat
     weak var delegate: PostCellDelegate?
+    var onPendingSelectionsChange: ((Set<String>) -> Void)?
 
     private let mainStack = UIStackView()
     private let optionsStack = UIStackView()
@@ -317,6 +318,7 @@ final class PollView: UIView {
             let changed = pendingSelections != votedOptionIds
             submitButton?.isHidden = !changed || pendingSelections.isEmpty
             updateSubmitEnabled()
+            onPendingSelectionsChange?(pendingSelections)
         } else {
             // Single choice — vote immediately
             delegate?.postCell(didVotePoll: poll.name, options: [optionId], forPost: post)
@@ -336,5 +338,15 @@ final class PollView: UIView {
         let min = poll.min ?? 1
         submitButton?.isEnabled = pendingSelections.count >= min
         submitButton?.backgroundColor = pendingSelections.count >= min ? .systemBlue : .systemGray3
+    }
+
+    func restorePendingSelections(_ selections: Set<String>) {
+        guard isMultiple, !hasVoted else { return }
+        let validIds = Set(poll.options.map(\.id))
+        pendingSelections = selections.intersection(validIds)
+        rebuildOptions()
+        let changed = pendingSelections != votedOptionIds
+        submitButton?.isHidden = !changed || pendingSelections.isEmpty
+        updateSubmitEnabled()
     }
 }

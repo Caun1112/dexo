@@ -71,5 +71,15 @@ final class LRUCache<Key: Hashable, Value> {
         order.removeAll()
     }
 
+    @discardableResult
+    func removeValue(forKey key: Key) -> Value? {
+        guard let oldValue = storage.removeValue(forKey: key) else { return nil }
+        if let i = order.firstIndex(of: key) {
+            order.remove(at: i)
+        }
+        onEvict?(key, oldValue)
+        return oldValue
+    }
+
     var count: Int { storage.count }
 }

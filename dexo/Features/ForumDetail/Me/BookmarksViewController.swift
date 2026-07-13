@@ -129,7 +129,7 @@ extension BookmarksViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
         let bookmark = viewModel.bookmarks[indexPath.row]
         if let topicId = bookmark.topicId {
-            let detailVC = TopicDetailViewController(api: api, topicId: topicId, initialFloor: bookmark.linkedPostNumber)
+            let detailVC = TopicDetailControllerFactory.make(api: api, topicId: topicId, initialFloor: bookmark.linkedPostNumber)
             navigationController?.pushViewController(detailVC, animated: true)
         }
     }
