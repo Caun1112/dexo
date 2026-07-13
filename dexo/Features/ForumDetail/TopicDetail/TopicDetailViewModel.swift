@@ -474,6 +474,8 @@ final class TopicDetailViewModel {
               let topicId = topic?.id ?? lastLoadedTopicId
         else { return [] }
 
+        errorMessage = nil
+        lastLoadError = nil
         loadingChildrenParentIds.insert(parentId)
         defer { loadingChildrenParentIds.remove(parentId) }
 
@@ -525,6 +527,8 @@ final class TopicDetailViewModel {
             return added
         } catch {
             debugLog("[TopicDetail] Load more children failed: \(error)")
+            lastLoadError = error
+            errorMessage = error.localizedDescription
             return []
         }
     }
@@ -1039,6 +1043,8 @@ final class TopicDetailViewModel {
     @discardableResult
     func loadEarlierPosts(containerWidth: CGFloat) async -> [Int] {
         guard canLoadEarlier, !isLoadingEarlier, let topicId = topic?.id else { return [] }
+        errorMessage = nil
+        lastLoadError = nil
         isLoadingEarlier = true
         defer { isLoadingEarlier = false }
 
@@ -1051,6 +1057,8 @@ final class TopicDetailViewModel {
         do {
             response = try await api.fetchTopicPosts(topicId: topicId, postIds: batch)
         } catch {
+            lastLoadError = error
+            errorMessage = error.localizedDescription
             return []
         }
 

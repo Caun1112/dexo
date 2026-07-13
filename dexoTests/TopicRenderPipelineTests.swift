@@ -23,6 +23,8 @@ final class TopicRenderPipelineTests: XCTestCase {
             guard case .paragraph(let nodes) = unit.block else { continue }
             XCTAssertLessThanOrEqual(nodes.reduce(0) { $0 + InlineNodeChunker.utf16Length(of: $1) }, RenderUnitBuilder.maxParagraphUTF16)
         }
+        XCTAssertTrue(units.dropLast().allSatisfy { $0.bottomSpacing == 0 })
+        XCTAssertEqual(units.last?.bottomSpacing, 8)
     }
 
     func testChunkingPreservesLinkAndSpoilerWrappers() {
@@ -153,6 +155,7 @@ final class TopicRenderPipelineTests: XCTestCase {
         XCTAssertEqual(VirtualTopicItem.collapsed(42).longPressPostId, 42)
         XCTAssertNil(VirtualTopicItem.title(1).longPressPostId)
         XCTAssertNil(VirtualTopicItem.loadMoreChildren(42).longPressPostId)
+        XCTAssertNil(VirtualTopicItem.paginationStatus.longPressPostId)
     }
 }
 
@@ -343,6 +346,17 @@ final class TopicRenderCacheTests: XCTestCase {
         XCTAssertEqual(cell.contentView.backgroundColor, ThemeManager.shared.cardBackgroundColor)
     }
 
+    func testVirtualTitleHeightIncludesWrappedTags() {
+        let tags = [
+            DiscourseTopicDetail.Tag(id: 1, name: "a-very-long-topic-tag", slug: "a"),
+            DiscourseTopicDetail.Tag(id: 2, name: "another-long-topic-tag", slug: "b"),
+        ]
+        let plain = VirtualTopicTitleCell.height(title: "Topic", tags: [], width: 240)
+        let tagged = VirtualTopicTitleCell.height(title: "Topic", tags: tags, width: 240)
+
+        XCTAssertGreaterThan(tagged, plain)
+    }
+
     func testVirtualFooterButtonTintsMatchLegacyStates() {
         let normal = VirtualPostFooterButtonTints.resolve(isLiked: false, hasCurrentUserBoost: false)
         XCTAssertEqual(normal.reply, .tertiaryLabel)
@@ -375,26 +389,143 @@ final class TopicRenderCacheTests: XCTestCase {
         XCTAssertEqual(cell.appliedButtonTints.more, .tertiaryLabel)
     }
 
+    func testVirtualReactionActionMatchesLegacyPluginAndUndoRules() {
+        XCTAssertEqual(
+            VirtualPostReactionActionResolver.resolve(
+                hasPlugin: true,
+                currentReactionId: nil,
+                currentReactionCanUndo: nil,
+                isLiked: false,
+                likeCanUndo: nil
+            ),
+            .showPicker
+        )
+        XCTAssertEqual(
+            VirtualPostReactionActionResolver.resolve(
+                hasPlugin: true,
+                currentReactionId: "heart",
+                currentReactionCanUndo: true,
+                isLiked: true,
+                likeCanUndo: true
+            ),
+            .toggleReaction("heart")
+        )
+        XCTAssertEqual(
+            VirtualPostReactionActionResolver.resolve(
+                hasPlugin: false,
+                currentReactionId: nil,
+                currentReactionCanUndo: nil,
+                isLiked: false,
+                likeCanUndo: nil
+            ),
+            .toggleLike(true)
+        )
+        XCTAssertEqual(
+            VirtualPostReactionActionResolver.resolve(
+                hasPlugin: false,
+                currentReactionId: nil,
+                currentReactionCanUndo: nil,
+                isLiked: true,
+                likeCanUndo: false
+            ),
+            .none
+        )
+    }
+
+    func testBlockSpoilerRevealStateCanBeRestoredAfterReuse() {
+        let overlay = SpoilerOverlayView(contentView: UIView())
+        var observed: Bool?
+        overlay.onRevealChange = { observed = $0 }
+
+        overlay.setRevealed(true)
+
+        XCTAssertTrue(overlay.isRevealed)
+        XCTAssertEqual(observed, true)
+    }
+
+    func testVirtualReactionSummaryMatchesLegacyThreeIconLimitAndResets() {
+        let view = VirtualPostReactionSummaryView(frame: .zero)
+        let reactions = (0..<4).map {
+            DiscourseTopicDetail.Reaction(id: "reaction-\($0)", type: "emoji", count: 1, canUndo: nil)
+        }
+
+        view.configure(reactions: reactions, count: 12)
+
+        XCTAssertFalse(view.isHidden)
+        XCTAssertEqual(view.visibleReactionCount, 3)
+        XCTAssertEqual(view.displayedCount, "12")
+
+        view.configure(reactions: [], count: 0)
+
+        XCTAssertTrue(view.isHidden)
+        XCTAssertEqual(view.visibleReactionCount, 0)
+        XCTAssertNil(view.displayedCount)
+    }
+
+    func testVirtualReactionSummaryUsesLegacyTreeIndent() {
+        let leaf = TreeLineState(
+            depth: 3,
+            isLastSibling: true,
+            ancestorTrails: [false, false],
+            hasChildren: false,
+            isCollapsed: false
+        )
+        let parent = TreeLineState(
+            depth: 3,
+            isLastSibling: true,
+            ancestorTrails: [false, false],
+            hasChildren: true,
+            isCollapsed: false
+        )
+
+        XCTAssertEqual(VirtualPostFooterLayout.reactionLeading(for: nil), 16)
+        XCTAssertEqual(
+            VirtualPostFooterLayout.reactionLeading(for: leaf),
+            12 + PostNativeCell.treeContentIndent(forDepth: leaf.depth)
+        )
+        XCTAssertGreaterThanOrEqual(
+            VirtualPostFooterLayout.reactionLeading(for: parent),
+            TreeLineView.columnX(forDepth: parent.depth + 1) + 15
+        )
+    }
+
+    func testVirtualPostSeparatorStaysAtEndOfPost() {
+        XCTAssertEqual(
+            VirtualPostSeparatorPlacement.resolve(isTreeMode: false, hasExpandedBoosts: false),
+            VirtualPostSeparatorPlacement(footer: true, boosts: false)
+        )
+        XCTAssertEqual(
+            VirtualPostSeparatorPlacement.resolve(isTreeMode: false, hasExpandedBoosts: true),
+            VirtualPostSeparatorPlacement(footer: false, boosts: true)
+        )
+        XCTAssertEqual(
+            VirtualPostSeparatorPlacement.resolve(isTreeMode: true, hasExpandedBoosts: false),
+            VirtualPostSeparatorPlacement(footer: false, boosts: false)
+        )
+        XCTAssertEqual(
+            VirtualPostSeparatorPlacement.resolve(isTreeMode: true, hasExpandedBoosts: true),
+            VirtualPostSeparatorPlacement(footer: false, boosts: false)
+        )
+    }
+
     func testTimelineDynamicUpdateMovesOnlySuffixWithoutRemeasuring() {
-        let layout = TopicTimelineLayout()
-        let delegate = TestTimelineLayoutDelegate(heights: [40, 50, 60])
-        layout.delegate = delegate
-        let collection = UICollectionView(frame: CGRect(x: 0, y: 0, width: 320, height: 200), collectionViewLayout: layout)
-        collection.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "Cell")
-        let source = TestTimelineDataSource(itemCount: 3)
-        collection.dataSource = source
-        collection.reloadData()
-        collection.layoutIfNeeded()
+        var geometry = TopicTimelineGeometry()
+        geometry.rebuild(heights: [40, 50, 60], width: 320)
+        XCTAssertEqual(geometry.frames[2].minY, 90)
 
-        XCTAssertEqual(delegate.measurementCount, 3)
-        XCTAssertEqual(layout.layoutAttributesForItem(at: IndexPath(item: 2, section: 0))?.frame.minY, 90)
+        geometry.applyHeightUpdates([1: 80])
 
-        layout.applyHeightUpdates([IndexPath(item: 1, section: 0): 80])
-        collection.layoutIfNeeded()
+        XCTAssertEqual(geometry.frames[1].height, 80)
+        XCTAssertEqual(geometry.frames[2].minY, 120)
+    }
 
-        XCTAssertEqual(delegate.measurementCount, 3)
-        XCTAssertEqual(layout.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))?.frame.height, 80)
-        XCTAssertEqual(layout.layoutAttributesForItem(at: IndexPath(item: 2, section: 0))?.frame.minY, 120)
+    func testTimelineFullReloadRebuildsHeightsWhenItemCountIsUnchanged() {
+        var geometry = TopicTimelineGeometry()
+        geometry.rebuild(heights: [40, 50, 60], width: 320)
+        geometry.rebuild(heights: [70, 80, 90], width: 320)
+
+        XCTAssertEqual(geometry.frames[0].height, 70)
+        XCTAssertEqual(geometry.frames[2].minY, 150)
     }
 }
 
@@ -407,32 +538,4 @@ private final class TestPostIDProviderView: UIView, TopicPostIDProviding {
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
-}
-
-@MainActor
-private final class TestTimelineLayoutDelegate: TopicTimelineLayoutDelegate {
-    let heights: [CGFloat]
-    private(set) var measurementCount = 0
-
-    init(heights: [CGFloat]) { self.heights = heights }
-
-    func topicTimelineLayout(_ layout: TopicTimelineLayout, heightForItemAt indexPath: IndexPath, width: CGFloat) -> CGFloat {
-        measurementCount += 1
-        return heights[indexPath.item]
-    }
-}
-
-@MainActor
-private final class TestTimelineDataSource: NSObject, UICollectionViewDataSource {
-    private let itemCount: Int
-
-    init(itemCount: Int) { self.itemCount = itemCount }
-
-    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        itemCount
-    }
-
-    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        collectionView.dequeueReusableCell(withReuseIdentifier: "Cell", for: indexPath)
-    }
 }

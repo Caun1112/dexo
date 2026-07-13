@@ -122,6 +122,17 @@ nonisolated struct RenderUnit: Sendable {
     let id: RenderUnitID
     let block: ContentBlock
     let sourceHTML: String
+    /// Space after this unit. Paragraphs split only for virtualization keep
+    /// zero spacing between their internal chunks so they still read as one
+    /// semantic paragraph.
+    let bottomSpacing: CGFloat
+
+    init(id: RenderUnitID, block: ContentBlock, sourceHTML: String, bottomSpacing: CGFloat = 8) {
+        self.id = id
+        self.block = block
+        self.sourceHTML = sourceHTML
+        self.bottomSpacing = bottomSpacing
+    }
 }
 
 nonisolated struct PostRenderDocument: Sendable {
@@ -235,11 +246,13 @@ nonisolated enum RenderUnitBuilder {
         for annotated in annotatedBlocks {
             if case .paragraph(let inlines) = annotated.block {
                 let chunks = InlineNodeChunker.chunk(inlines, maximumUTF16Length: maxParagraphUTF16)
-                for chunk in chunks where !chunk.isEmpty {
+                let nonemptyChunks = chunks.filter { !$0.isEmpty }
+                for (index, chunk) in nonemptyChunks.enumerated() {
                     units.append(RenderUnit(
                         id: RenderUnitID(postId: postId, contentVersion: contentVersion, ordinal: ordinal),
                         block: .paragraph(chunk),
-                        sourceHTML: annotated.sourceHTML
+                        sourceHTML: annotated.sourceHTML,
+                        bottomSpacing: index == nonemptyChunks.count - 1 ? 8 : 0
                     ))
                     ordinal += 1
                 }

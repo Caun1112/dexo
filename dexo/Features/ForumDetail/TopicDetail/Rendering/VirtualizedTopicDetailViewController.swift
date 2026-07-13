@@ -23,6 +23,7 @@ nonisolated enum VirtualTopicItem: Hashable, Sendable {
     case boosts(Int)
     case collapsed(Int)
     case loadMoreChildren(Int)
+    case paginationStatus
 
     var longPressPostId: Int? {
         switch self {
@@ -30,7 +31,7 @@ nonisolated enum VirtualTopicItem: Hashable, Sendable {
             return postId
         case .unit(let id):
             return id.postId
-        case .title, .loadMoreChildren:
+        case .title, .loadMoreChildren, .paginationStatus:
             return nil
         }
     }
@@ -39,7 +40,7 @@ nonisolated enum VirtualTopicItem: Hashable, Sendable {
 /// Default topic renderer. Posts are flattened into independently reusable
 /// header/body/footer items, so a very tall post never forces UIKit to create
 /// or draw its complete view tree in one frame.
-final class VirtualizedTopicDetailViewController: ObservableViewController {
+final class VirtualizedTopicDetailViewController: ObservableViewController, UIGestureRecognizerDelegate {
     private let api: DiscourseAPI
     private let topicId: Int
     private let baseURL: String
@@ -55,6 +56,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
     private var dynamicStateRevisions: [RenderUnitID: Int] = [:]
     private var expandedDetailsUnitIds: Set<RenderUnitID> = []
     private var pendingPollSelectionsByUnitId: [RenderUnitID: Set<String>] = [:]
+    private var revealedSpoilerUnitIds: Set<RenderUnitID> = []
     private var lastEnvironment: RenderEnvironment?
     private var isApplyingSnapshot = false
     private var hasPendingSnapshot = false
@@ -71,10 +73,20 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
     private var jumpScrubReferenceDistance: CGFloat = 1
     private let jumpScrubMoveThreshold: CGFloat = 8
     private let readTracker = TopicReadTracker()
+    private var readFlushTimer: Timer?
+    private var pendingReadFlush: DispatchWorkItem?
+    private static let readFlushInterval: TimeInterval = 60
+    private static let readFlushDebounce: TimeInterval = 1.5
     private let imageZoomTransition = ImageZoomTransitionDelegate()
+    private lazy var boostDanmaku = BoostDanmakuOverlay(hostView: view)
     private let floatingReplyButton = FloatingReplyButton()
     private var floatingReplyButtonPositioned = false
     private var treeReloadGeneration: UInt = 0
+    private var isReloadingTreeMode = false
+    private var isPerformingJump = false
+    private var modeGeneration: UInt = 0
+    private var contentOperationGeneration: UInt = 0
+    private var scrollToTopAfterSnapshot = false
 
     private let timelineLayout = TopicTimelineLayout()
     private lazy var collectionView: UICollectionView = {
@@ -102,20 +114,36 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         case .title:
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: VirtualTopicTitleCell.reuseIdentifier, for: indexPath) as! VirtualTopicTitleCell
             let topic = self.viewModel.topic
-            cell.configure(title: topic?.fancyTitle ?? topic?.title ?? "")
+            cell.configure(
+                title: topic?.fancyTitle ?? topic?.title ?? "",
+                tags: topic?.tags ?? [],
+                onTag: { [weak self] tag in
+                    guard let self else { return }
+                    self.navigationController?.pushViewController(TagTopicsViewController(api: self.api, tag: tag), animated: true)
+                }
+            )
             return cell
 
         case .header(let postId):
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: VirtualPostHeaderCell.reuseIdentifier, for: indexPath) as! VirtualPostHeaderCell
             guard let post = self.viewModel.postsById[postId] else { return cell }
+            let floor: Int
+            if !self.viewModel.isFilteringByOP,
+               let streamIndex = self.viewModel.allPostIds.firstIndex(of: postId)
+            {
+                floor = streamIndex + 1
+            } else {
+                floor = (self.viewModel.visiblePosts.firstIndex(where: { $0.id == postId }) ?? 0) + 1
+            }
             cell.configure(
                 post: post,
-                floor: post.postNumber,
+                floor: floor,
                 baseURL: self.baseURL,
                 isOP: post.username == self.viewModel.opUsername,
                 treeState: self.viewModel.isTreeMode ? self.viewModel.postTreeLineStates[postId] : nil
             )
             cell.onAvatar = { [weak self] in self?.postCell(didTapAvatarForUsername: $0) }
+            cell.onReplyReference = { [weak self] in self?.postCell(didTapReplyReferenceForPost: post) }
             return cell
 
         case .unit(let unitId):
@@ -145,6 +173,11 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
                 onPollPendingSelectionsChange: { [weak self] selections in
                     self?.pendingPollSelectionsByUnitId[unitId] = selections
                 },
+                spoilerRevealed: self.revealedSpoilerUnitIds.contains(unitId),
+                onSpoilerRevealChange: { [weak self] revealed in
+                    if revealed { self?.revealedSpoilerUnitIds.insert(unitId) }
+                    else { self?.revealedSpoilerUnitIds.remove(unitId) }
+                },
                 heightPolicy: heightPolicy
             )
             return cell
@@ -152,16 +185,26 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         case .footer(let postId):
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: VirtualPostFooterCell.reuseIdentifier, for: indexPath) as! VirtualPostFooterCell
             guard let post = self.viewModel.postsById[postId] else { return cell }
+            let hasExpandedBoosts = self.viewModel.expandedBoostPostIds.contains(postId)
+            let separatorPlacement = VirtualPostSeparatorPlacement.resolve(
+                isTreeMode: self.viewModel.isTreeMode,
+                hasExpandedBoosts: hasExpandedBoosts
+            )
             cell.configure(
                 post: post,
-                menu: self.moreMenu(for: post),
+                menu: self.moreMenu(for: post, sourceView: cell.moreMenuSourceView),
+                validReactions: self.viewModel.topic?.validReactions ?? [],
                 hidesLikeButton: ForumPolicy.hidesLikeButton(baseURL: self.baseURL),
                 treeState: self.viewModel.isTreeMode ? self.viewModel.postTreeLineStates[postId] : nil,
-                isLastVisualItem: !self.viewModel.expandedBoostPostIds.contains(postId)
+                isLastVisualItem: !hasExpandedBoosts,
+                showsSeparator: separatorPlacement.footer
             )
             cell.onReply = { [weak self] in self?.postCell(didTapReplyToPost: post) }
             cell.onLike = { [weak self] in
                 self?.postCell(didToggleLikeForPost: post, liked: post.likeAction?.acted != true)
+            }
+            cell.onReaction = { [weak self] reaction in
+                self?.postCell(didTapReaction: reaction, forPost: post)
             }
             cell.onBoost = { [weak self] in
                 guard let self else { return }
@@ -171,6 +214,8 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
                     self.postCell(didTapToggleBoostsForPost: post, sourceView: cell)
                 }
             }
+            cell.onCreateBoost = { [weak self] in self?.postCell(didTapBoostForPost: post) }
+            cell.onShowReplies = { [weak self] in self?.postCell(didTapShowRepliesForPostId: post.id) }
             cell.onCollapse = { [weak self] in
                 self?.postCell(didToggleCollapseForPostId: postId)
             }
@@ -200,17 +245,34 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
             guard let post = self.viewModel.postsById[postId] else { return cell }
             let depth = self.viewModel.isTreeMode ? (self.viewModel.postDepths[postId] ?? 0) : 0
             let indent = PostNativeCell.treeContentIndent(forDepth: depth)
+            let separatorPlacement = VirtualPostSeparatorPlacement.resolve(
+                isTreeMode: self.viewModel.isTreeMode,
+                hasExpandedBoosts: true
+            )
             cell.configure(
                 post: post,
                 delegate: self,
                 assetBaseURL: self.api.assetBaseURL,
                 contentWidth: collectionView.bounds.width,
                 leadingIndent: indent,
-                treeState: self.viewModel.isTreeMode ? self.viewModel.postTreeLineStates[postId] : nil
+                treeState: self.viewModel.isTreeMode ? self.viewModel.postTreeLineStates[postId] : nil,
+                showsSeparator: separatorPlacement.boosts
             )
             cell.onCollapse = { [weak self] in
                 self?.postCell(didToggleCollapseForPostId: postId)
             }
+            return cell
+
+        case .paginationStatus:
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: VirtualTopicMessageCell.reuseIdentifier, for: indexPath) as! VirtualTopicMessageCell
+            let isLoading = self.viewModel.isLoadingMore
+            cell.configure(
+                text: isLoading
+                    ? String(localized: "topic_detail.loading_more")
+                    : String(localized: "topic_detail.load_more_retry"),
+                isLoading: isLoading
+            )
+            cell.onTap = { [weak self] in self?.retryPagination() }
             return cell
         }
     }
@@ -220,6 +282,67 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         view.translatesAutoresizingMaskIntoConstraints = false
         view.hidesWhenStopped = true
         return view
+    }()
+
+    private let navTitleLabel: UILabel = {
+        let label = UILabel()
+        label.font = FontManager.shared.font(size: 17, weight: .semibold)
+        label.numberOfLines = 1
+        return label
+    }()
+
+    private let errorLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = FontManager.shared.font(size: 14)
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.isHidden = true
+        return label
+    }()
+
+    private let topLoadingBar: UIView = {
+        let bar = UIView()
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.backgroundColor = ThemeManager.shared.cardBackgroundColor.withAlphaComponent(0.92)
+        bar.alpha = 0
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.startAnimating()
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = String(localized: "topic_detail.loading_earlier")
+        label.font = FontManager.shared.font(size: 13)
+        label.textColor = .secondaryLabel
+        let stack = UIStackView(arrangedSubviews: [spinner, label])
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 8
+        bar.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 36),
+        ])
+        return bar
+    }()
+
+    private lazy var jumpOverlay: UIView = {
+        let overlay = UIView()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.backgroundColor = ThemeManager.shared.cardBackgroundColor.withAlphaComponent(0.88)
+        overlay.isHidden = true
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.startAnimating()
+        overlay.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+        ])
+        return overlay
     }()
 
     private lazy var bottomBar: TopicDetailBottomBar = {
@@ -248,12 +371,15 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         viewModel.isTreeMode = AppSettings.shared.topicTreeMode
         viewModel.treeSort = AppSettings.shared.topicTreeSort
         updateTreeModeControls()
-        collectionView.addGestureRecognizer(
-            UILongPressGestureRecognizer(target: self, action: #selector(handlePostLongPress(_:)))
-        )
+        let postLongPress = UILongPressGestureRecognizer(target: self, action: #selector(handlePostLongPress(_:)))
+        postLongPress.delegate = self
+        collectionView.addGestureRecognizer(postLongPress)
 
         view.addSubview(collectionView)
         view.addSubview(activityIndicator)
+        view.addSubview(errorLabel)
+        view.addSubview(topLoadingBar)
+        view.addSubview(jumpOverlay)
         view.addSubview(bottomBar)
         view.addSubview(floatingReplyButton)
         floatingReplyButton.addTarget(self, action: #selector(floatingReplyTapped), for: .touchUpInside)
@@ -264,6 +390,17 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            errorLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            errorLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            errorLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            errorLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            topLoadingBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            topLoadingBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topLoadingBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            jumpOverlay.topAnchor.constraint(equalTo: collectionView.topAnchor),
+            jumpOverlay.leadingAnchor.constraint(equalTo: collectionView.leadingAnchor),
+            jumpOverlay.trailingAnchor.constraint(equalTo: collectionView.trailingAnchor),
+            jumpOverlay.bottomAnchor.constraint(equalTo: collectionView.bottomAnchor),
             bottomBar.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
             bottomBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
         ])
@@ -272,16 +409,27 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
 
         NotificationCenter.default.addObserver(self, selector: #selector(renderEnvironmentChanged), name: ThemeManager.themeDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(renderEnvironmentChanged), name: FontManager.fontDidChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
         Task { await initialLoad() }
+        Task {
+            await api.loadOrFetchEmojiMap()
+            applySnapshot(reloadVisible: true)
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        readTracker.startSession()
+        resumeReadTracking()
+        startReadFlushTimer()
+        scheduleDebouncedReadFlush()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        cancelPendingReadFlush()
+        stopReadFlushTimer()
+        flushReadTimings()
         readTracker.pause()
         cancelAllImagePrefetches()
     }
@@ -311,6 +459,8 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         let color = ThemeManager.shared.cardBackgroundColor
         view.backgroundColor = color
         collectionView.backgroundColor = color
+        topLoadingBar.backgroundColor = color.withAlphaComponent(0.92)
+        jumpOverlay.backgroundColor = color.withAlphaComponent(0.88)
     }
 
     private func initialLoad() async {
@@ -340,8 +490,120 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
     }
 
     override func updateUI() {
-        if viewModel.isLoading { activityIndicator.startAnimating() } else { activityIndicator.stopAnimating() }
-        if viewModel.isReady { applySnapshot(reloadVisible: false) }
+        if viewModel.isLoading || isReloadingTreeMode {
+            activityIndicator.startAnimating()
+        } else {
+            activityIndicator.stopAnimating()
+        }
+        if viewModel.isReady, !isReloadingTreeMode, !isPerformingJump { applySnapshot(reloadVisible: false) }
+        if let topic = viewModel.topic {
+            title = nil
+            TopicCell.applyEmojiTitle(topic.fancyTitle ?? topic.title, to: navTitleLabel)
+            navTitleLabel.sizeToFit()
+        }
+        errorLabel.text = viewModel.errorMessage
+        errorLabel.isHidden = viewModel.errorMessage == nil
+        topLoadingBar.alpha = viewModel.isLoadingEarlier ? 1 : 0
+        bottomBar.setOPOnlySelected(viewModel.isFilteringByOP)
+        handleLoadErrorIfNeeded()
+    }
+
+    @objc private func appDidEnterBackground() {
+        cancelPendingReadFlush()
+        stopReadFlushTimer()
+        flushReadTimings()
+        readTracker.pause()
+    }
+
+    @objc private func appWillEnterForeground() {
+        resumeReadTracking()
+        startReadFlushTimer()
+        scheduleDebouncedReadFlush()
+    }
+
+    private func resumeReadTracking() {
+        readTracker.startSession()
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            guard let item = dataSource.itemIdentifier(for: indexPath),
+                  let postId = postIdByItem[item],
+                  let post = viewModel.postsById[postId]
+            else { continue }
+            readTracker.recordVisible(postNumber: post.postNumber)
+        }
+    }
+
+    private func startReadFlushTimer() {
+        stopReadFlushTimer()
+        let timer = Timer(timeInterval: Self.readFlushInterval, repeats: true) { [weak self] _ in
+            self?.flushReadTimings()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        readFlushTimer = timer
+    }
+
+    private func stopReadFlushTimer() {
+        readFlushTimer?.invalidate()
+        readFlushTimer = nil
+    }
+
+    private func scheduleDebouncedReadFlush() {
+        cancelPendingReadFlush()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingReadFlush = nil
+            self?.flushReadTimings()
+        }
+        pendingReadFlush = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.readFlushDebounce, execute: work)
+    }
+
+    private func cancelPendingReadFlush() {
+        pendingReadFlush?.cancel()
+        pendingReadFlush = nil
+    }
+
+    private func flushReadTimings() {
+        let snapshot = readTracker.snapshotDelta()
+        guard !snapshot.timings.isEmpty else { return }
+        let api = api
+        let topicId = topicId
+        Task.detached {
+            try? await api.postTopicTimings(
+                topicId: topicId,
+                topicTime: snapshot.topicTime,
+                timings: snapshot.timings
+            )
+        }
+    }
+
+    private func handleLoadErrorIfNeeded() {
+        guard let error = viewModel.lastLoadError else { return }
+        viewModel.lastLoadError = nil
+        presentChallengePromptIfNeeded(error: error, on: api)
+    }
+
+    private func retryPagination() {
+        guard viewModel.loadMoreFailed, !isLoadingPage else { return }
+        viewModel.loadMoreFailed = false
+        isLoadingPage = true
+        let operationGeneration = contentOperationGeneration
+        applySnapshot(reloadVisible: false, preserving: captureAnchor())
+        Task {
+            let anchor = captureAnchor()
+            if viewModel.isTreeMode {
+                _ = await viewModel.loadMoreNestedRoots()
+            } else if viewModel.isReverseOrder {
+                _ = await viewModel.loadEarlierPosts(containerWidth: view.bounds.width)
+            } else {
+                _ = await viewModel.loadMorePosts(containerWidth: view.bounds.width)
+            }
+            guard operationGeneration == contentOperationGeneration else {
+                isLoadingPage = false
+                return
+            }
+            applySnapshot(reloadVisible: false, preserving: anchor)
+            handleLoadErrorIfNeeded()
+            isLoadingPage = false
+        }
     }
 
     /// Builds the complete height table before any matching snapshot is
@@ -418,12 +680,12 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         config: NativeRenderConfig
     ) -> RenderUnitHeightPolicy {
         if let measured = BlockHeightCalculator.height(for: unit.block, config: config) {
-            let height = ceil(measured) + 8
+            let height = ceil(measured) + unit.bottomSpacing
             return blockNeedsDeferredHeight(unit.block) ? .deferred(height) : .fixed(height)
         }
 
         let measured = measureHostedUnit(unit, post: post, config: config)
-        let height = max(1, ceil(measured) + 8)
+        let height = max(1, ceil(measured) + unit.bottomSpacing)
         switch unit.block {
         case .details, .rawHTML:
             return .deferred(height)
@@ -561,11 +823,15 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
                 items.append(item)
             }
         }
+        if viewModel.isLoadingMore || viewModel.loadMoreFailed {
+            items.append(.paginationStatus)
+        }
         snapshot.appendItems(items)
         return snapshot
     }
 
     private func applySnapshot(reloadVisible: Bool, preserving anchor: (VirtualTopicItem, CGFloat)? = nil) {
+        guard !isReloadingTreeMode else { return }
         let isMoving = collectionView.isTracking || collectionView.isDragging || collectionView.isDecelerating
         if isApplyingSnapshot || isMoving {
             hasPendingSnapshot = true
@@ -601,6 +867,14 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
             {
                 self.collectionView.contentOffset.y = attributes.frame.minY - anchor.1
             }
+            if self.scrollToTopAfterSnapshot {
+                self.scrollToTopAfterSnapshot = false
+                self.collectionView.setContentOffset(
+                    CGPoint(x: 0, y: -self.collectionView.adjustedContentInset.top),
+                    animated: false
+                )
+            }
+            if self.viewIfLoaded?.window != nil { self.resumeReadTracking() }
             if !self.flushPendingSnapshotIfNeeded() {
                 self.commitPendingDynamicHeights()
             }
@@ -620,6 +894,8 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         hasPendingSnapshot = false
         pendingSnapshotReloadVisible = false
         pendingSnapshotAnchor = nil
+        readTracker.pause()
+        visibleItemCountsByPost.removeAll(keepingCapacity: true)
         applySnapshot(reloadVisible: reloadVisible, preserving: anchor)
         return true
     }
@@ -654,6 +930,9 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         )
         guard environment != lastEnvironment else { return }
         lastEnvironment = environment
+        // A mode switch owns the next complete layout. Do not invalidate the
+        // still-visible old snapshot against a half-loaded new view-model.
+        guard !isReloadingTreeMode else { return }
         preparedLayout = nil
         heightPolicyCache.removeAll(keepingCapacity: true)
         resolvedHeights.removeAll(keepingCapacity: true)
@@ -674,9 +953,68 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         postCell(didLongPressPost: post)
     }
 
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var candidate = touch.view
+        while let view = candidate, view !== collectionView {
+            if view is UIControl { return false }
+            candidate = view.superview
+        }
+        return true
+    }
+
     private func nextTreeReloadGeneration() -> UInt {
         treeReloadGeneration &+= 1
         return treeReloadGeneration
+    }
+
+    private func reloadAllAfterTreeModeChange(
+        generation: UInt,
+        resetContentOffset: Bool
+    ) async -> Bool {
+        // A non-animated diffable apply can still be completing when the mode
+        // button is tapped. Wait for it before invoking reload-data semantics.
+        while isApplyingSnapshot {
+            await Task.yield()
+            guard generation == treeReloadGeneration else { return false }
+        }
+        guard generation == treeReloadGeneration else { return false }
+
+        cancelAllImagePrefetches()
+        readTracker.pause()
+        visibleItemCountsByPost.removeAll(keepingCapacity: true)
+        preparedLayout = nil
+        heightPolicyCache.removeAll(keepingCapacity: true)
+        resolvedHeights.removeAll(keepingCapacity: true)
+        resolvedBoostHeights.removeAll(keepingCapacity: true)
+        pendingDynamicHeights.removeAll(keepingCapacity: true)
+        hasPendingSnapshot = false
+        pendingSnapshotReloadVisible = false
+        pendingSnapshotAnchor = nil
+
+        // Recompute every height for the new indentation/content width before
+        // publishing the new snapshot, then force UICollectionView to discard
+        // every existing cell and layout attribute even when IDs are unchanged.
+        prepareCurrentLayout()
+        let snapshot = makeSnapshot()
+        timelineLayout.reloadAllHeights()
+        isApplyingSnapshot = true
+        await dataSource.applySnapshotUsingReloadData(snapshot)
+        isApplyingSnapshot = false
+
+        guard generation == treeReloadGeneration else { return false }
+        collectionView.layoutIfNeeded()
+        if resetContentOffset {
+            collectionView.setContentOffset(
+                CGPoint(x: 0, y: -collectionView.adjustedContentInset.top),
+                animated: false
+            )
+        }
+        readTracker.startSession()
+        isReloadingTreeMode = false
+        AppSettings.shared.topicTreeMode = viewModel.isTreeMode
+        updateTreeModeControls()
+        activityIndicator.stopAnimating()
+        return true
     }
 
     private func treeModeBarButtonItem() -> UIBarButtonItem {
@@ -731,6 +1069,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
         AppSettings.shared.topicTreeSort = sort
         navigationItem.rightBarButtonItem = treeModeBarButtonItem()
         let generation = nextTreeReloadGeneration()
+        contentOperationGeneration &+= 1
         let anchor = captureAnchor()
         Task {
             await viewModel.loadNestedTopic(id: topicId, sort: sort, containerWidth: view.bounds.width)
@@ -743,29 +1082,53 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
     }
 
     @objc private func toggleTreeMode() {
-        viewModel.isTreeMode.toggle()
+        contentOperationGeneration &+= 1
+        isReloadingTreeMode = true
+        let targetTreeMode = !viewModel.isTreeMode
+        viewModel.isTreeMode = targetTreeMode
         AppSettings.shared.topicTreeMode = viewModel.isTreeMode
         updateTreeModeControls()
         let generation = nextTreeReloadGeneration()
-        let anchor = captureAnchor()
+        activityIndicator.startAnimating()
         Task {
-            if viewModel.isTreeMode {
+            if targetTreeMode {
                 await viewModel.loadNestedTopic(id: topicId, containerWidth: view.bounds.width)
             } else {
                 await viewModel.loadTopic(id: topicId, containerWidth: view.bounds.width)
             }
             guard generation == treeReloadGeneration else { return }
-            resolvedHeights.removeAll()
-            resolvedBoostHeights.removeAll()
-            applySnapshot(reloadVisible: true, preserving: anchor)
+            _ = await reloadAllAfterTreeModeChange(
+                generation: generation,
+                resetContentOffset: true
+            )
         }
     }
 
     @objc private func floatingReplyTapped() {
-        presentReplyComposer(for: nil)
+        requireAuthentication { [weak self] in self?.presentReplyComposer(for: nil) }
     }
 
-    private func moreMenu(for post: DiscourseTopicDetail.Post) -> UIMenu {
+    private func requireAuthentication(_ action: @escaping () -> Void) {
+        guard let gate = findAuthGating() else { return }
+        gate.requireAuth(then: action)
+    }
+
+    private func findAuthGating() -> AuthGating? {
+        var controller: UIViewController? = self
+        while let parent = controller?.parent {
+            if let gate = parent as? AuthGating { return gate }
+            for child in parent.children {
+                if let gate = child as? AuthGating { return gate }
+                for grandchild in child.children {
+                    if let gate = grandchild as? AuthGating { return gate }
+                }
+            }
+            controller = parent
+        }
+        return nil
+    }
+
+    private func moreMenu(for post: DiscourseTopicDetail.Post, sourceView: UIView) -> UIMenu {
         var actions: [UIAction] = [
             UIAction(title: String(localized: "post.copy_link"), image: UIImage(systemName: "link")) { [weak self] _ in
                 guard let self else { return }
@@ -779,9 +1142,9 @@ final class VirtualizedTopicDetailViewController: ObservableViewController {
             },
         ]
         if post.canFlag {
-            actions.append(UIAction(title: String(localized: "post.flag"), image: UIImage(systemName: "flag"), attributes: .destructive) { [weak self] _ in
+            actions.append(UIAction(title: String(localized: "post.flag"), image: UIImage(systemName: "flag"), attributes: .destructive) { [weak self, weak sourceView] _ in
                 guard let self else { return }
-                self.postCell(didTapFlagPost: post, sourceView: self.view)
+                self.postCell(didTapFlagPost: post, sourceView: sourceView ?? self.view)
             })
         }
         return UIMenu(children: actions)
@@ -794,17 +1157,12 @@ extension VirtualizedTopicDetailViewController: TopicTimelineLayoutDelegate {
         switch item {
         case .title:
             let title = viewModel.topic?.fancyTitle ?? viewModel.topic?.title ?? ""
-            let font = FontManager.shared.font(size: 20, weight: .bold)
-            let rect = (title as NSString).boundingRect(
-                with: CGSize(width: max(1, width - 32), height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: [.font: font], context: nil
-            )
-            return ceil(rect.height) + 24
-        case .header: return 56
+            return VirtualTopicTitleCell.height(title: title, tags: viewModel.topic?.tags ?? [], width: width)
+        case .header: return max(56, FontManager.shared.scaled(32) + 24)
         case .footer: return 50
         case .collapsed: return PostCollapsedCell.cellHeight
         case .loadMoreChildren: return LoadMoreChildrenCell.cellHeight
+        case .paginationStatus: return 44
         case .boosts(let postId): return resolvedBoostHeights[postId] ?? 44
         case .unit(let id):
             if let resolved = resolvedHeights[id] { return resolved }
@@ -858,8 +1216,13 @@ extension VirtualizedTopicDetailViewController: UICollectionViewDelegate, UIColl
             visibleItemCountsByPost[postId] = count + 1
             if count == 0 { readTracker.recordVisible(postNumber: post.postNumber) }
         }
-        guard indexPath.item >= collectionView.numberOfItems(inSection: 0) - 3, !isLoadingPage else { return }
+        guard indexPath.item >= collectionView.numberOfItems(inSection: 0) - 3,
+              !isLoadingPage,
+              !viewModel.loadMoreFailed,
+              item != .paginationStatus
+        else { return }
         isLoadingPage = true
+        let operationGeneration = contentOperationGeneration
         Task {
             let anchor = captureAnchor()
             if viewModel.isTreeMode {
@@ -869,7 +1232,12 @@ extension VirtualizedTopicDetailViewController: UICollectionViewDelegate, UIColl
             } else {
                 _ = await viewModel.loadMorePosts(containerWidth: view.bounds.width)
             }
+            guard operationGeneration == contentOperationGeneration else {
+                isLoadingPage = false
+                return
+            }
             applySnapshot(reloadVisible: false, preserving: anchor)
+            handleLoadErrorIfNeeded()
             isLoadingPage = false
         }
     }
@@ -883,30 +1251,51 @@ extension VirtualizedTopicDetailViewController: UICollectionViewDelegate, UIColl
         }
     }
 
-    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { loadEarlierArmed = true }
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        loadEarlierArmed = true
+        cancelPendingReadFlush()
+    }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate, !flushPendingSnapshotIfNeeded() { commitPendingDynamicHeights() }
+        if !decelerate {
+            if !flushPendingSnapshotIfNeeded() { commitPendingDynamicHeights() }
+            scheduleDebouncedReadFlush()
+        }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         if !flushPendingSnapshotIfNeeded() { commitPendingDynamicHeights() }
+        scheduleDebouncedReadFlush()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         if !flushPendingSnapshotIfNeeded() { commitPendingDynamicHeights() }
+        scheduleDebouncedReadFlush()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if let titlePath = dataSource.indexPath(for: .title(topicId)),
+           let attributes = collectionView.layoutAttributesForItem(at: titlePath)
+        {
+            navigationItem.titleView = scrollView.contentOffset.y + scrollView.adjustedContentInset.top >= attributes.frame.maxY
+                ? navTitleLabel
+                : nil
+        }
         guard loadEarlierArmed, !isLoadingPage, viewModel.canLoadEarlier, !viewModel.isReverseOrder,
               scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top + 180
         else { return }
         loadEarlierArmed = false
         isLoadingPage = true
         let anchor = captureAnchor()
+        let operationGeneration = contentOperationGeneration
         Task {
             _ = await viewModel.loadEarlierPosts(containerWidth: view.bounds.width)
+            guard operationGeneration == contentOperationGeneration else {
+                isLoadingPage = false
+                return
+            }
             applySnapshot(reloadVisible: false, preserving: anchor)
+            handleLoadErrorIfNeeded()
             isLoadingPage = false
         }
     }
@@ -1014,6 +1403,7 @@ extension VirtualizedTopicDetailViewController: TopicDetailBottomBarDelegate {
 
     func bottomBarDidTapOPOnly() {
         viewModel.isFilteringByOP.toggle()
+        scrollToTopAfterSnapshot = true
         applySnapshot(reloadVisible: false)
     }
 
@@ -1036,6 +1426,9 @@ extension VirtualizedTopicDetailViewController: TopicDetailBottomBarDelegate {
     }
 
     func bottomBarDidToggleReverseOrder() {
+        contentOperationGeneration &+= 1
+        modeGeneration &+= 1
+        let generation = modeGeneration
         Task {
             if viewModel.isReverseOrder {
                 viewModel.disableReverseOrder()
@@ -1043,22 +1436,31 @@ extension VirtualizedTopicDetailViewController: TopicDetailBottomBarDelegate {
             } else {
                 await viewModel.enableReverseOrder(containerWidth: view.bounds.width)
             }
+            guard generation == modeGeneration else { return }
             resolvedHeights.removeAll()
             resolvedBoostHeights.removeAll()
+            scrollToTopAfterSnapshot = true
             applySnapshot(reloadVisible: false)
         }
     }
 
     func bottomBarDidToggleSummaryMode() {
+        contentOperationGeneration &+= 1
+        modeGeneration &+= 1
+        let generation = modeGeneration
         Task {
             await viewModel.toggleSummaryMode(containerWidth: view.bounds.width)
+            guard generation == modeGeneration else { return }
             resolvedHeights.removeAll()
             resolvedBoostHeights.removeAll()
+            scrollToTopAfterSnapshot = true
             applySnapshot(reloadVisible: false)
         }
     }
 
-    func bottomBarDidTapReply() { presentReplyComposer(for: nil) }
+    func bottomBarDidTapReply() {
+        requireAuthentication { [weak self] in self?.presentReplyComposer(for: nil) }
+    }
     func bottomBarDidBeginScrubFromJump(at locationInWindow: CGPoint, buttonFrame: CGRect) {
         let total = viewModel.totalFloors
         guard total > 1, jumpScrubber == nil else { return }
@@ -1124,20 +1526,23 @@ extension VirtualizedTopicDetailViewController: TopicDetailBottomBarDelegate {
 
     private func performJump(to floor: Int) {
         guard floor >= 1 else { return }
+        contentOperationGeneration &+= 1
         if viewModel.isTreeMode {
+            isReloadingTreeMode = true
             viewModel.isTreeMode = false
             updateTreeModeControls()
             let generation = nextTreeReloadGeneration()
+            activityIndicator.startAnimating()
             Task {
                 await viewModel.loadTopic(id: topicId, containerWidth: view.bounds.width)
                 if !viewModel.isFloorLoaded(floor) {
                     _ = await viewModel.jumpToFloor(floor, containerWidth: view.bounds.width)
                 }
                 guard generation == treeReloadGeneration, !viewModel.isTreeMode else { return }
-                resolvedHeights.removeAll()
-                resolvedBoostHeights.removeAll()
-                applySnapshot(reloadVisible: false)
-                collectionView.layoutIfNeeded()
+                guard await reloadAllAfterTreeModeChange(
+                    generation: generation,
+                    resetContentOffset: false
+                ) else { return }
                 scrollToFloor(floor, position: .top)
             }
             return
@@ -1146,8 +1551,20 @@ extension VirtualizedTopicDetailViewController: TopicDetailBottomBarDelegate {
             scrollToFloor(floor, position: .top)
             return
         }
+        isPerformingJump = true
+        jumpOverlay.isHidden = false
         Task {
-            _ = await viewModel.jumpToFloor(floor, containerWidth: view.bounds.width)
+            let succeeded = await viewModel.jumpToFloor(floor, containerWidth: view.bounds.width)
+            isPerformingJump = false
+            jumpOverlay.isHidden = true
+            guard succeeded else {
+                if let error = viewModel.lastLoadError { handleLoadErrorIfNeeded(); presentError(error) }
+                else if let message = viewModel.errorMessage {
+                    let error = NSError(domain: "TopicJump", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+                    presentError(error)
+                }
+                return
+            }
             resolvedHeights.removeAll()
             resolvedBoostHeights.removeAll()
             applySnapshot(reloadVisible: false)
@@ -1185,12 +1602,17 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
 
     func postCell(didTapShowRepliesForPostId postId: Int) {
         let controller = RepliesViewController(api: api, postId: postId, topicId: topicId, validReactions: viewModel.topic?.validReactions ?? [])
-        if let sheet = controller.sheetPresentationController { sheet.detents = [.medium(), .large()] }
+        if let sheet = controller.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
         present(controller, animated: true)
     }
 
     func postCell(didTapToggleDetails detailsIndex: Int, postId: Int) {}
-    func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post) { presentReplyComposer(for: post) }
+    func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post) {
+        requireAuthentication { [weak self] in self?.presentReplyComposer(for: post) }
+    }
 
     func postCell(didTapReplyReferenceForPost post: DiscourseTopicDetail.Post) {
         guard let number = post.replyToPostNumber else { return }
@@ -1217,46 +1639,84 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
             let anchor = captureAnchor()
             _ = await viewModel.loadMoreChildren(forParentId: parentPostId)
             applySnapshot(reloadVisible: true, preserving: anchor)
+            handleLoadErrorIfNeeded()
         }
     }
 
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool) {
         Task {
-            if isBookmarked { _ = try? await api.createBookmark(postId: post.id) }
-            else if let id = post.bookmarkId { try? await api.deleteBookmark(id: id) }
+            do {
+                if isBookmarked { _ = try await api.createBookmark(postId: post.id) }
+                else if let id = post.bookmarkId { try await api.deleteBookmark(id: id) }
+                if let fresh = try? await api.fetchPost(id: post.id) { await viewModel.replacePost(fresh) }
+                applySnapshot(reloadVisible: true)
+            } catch {
+                if !presentChallengePromptIfNeeded(error: error, on: api) { presentError(error) }
+            }
         }
     }
 
     func postCell(didTapAvatarForUsername username: String) {
-        navigationController?.pushViewController(UserProfileViewController(api: api, username: username), animated: true)
+        let topicTitle = viewModel.topic?.title
+        let prefill = topicTitle.map { "[\($0)](\(baseURL)/t/\(topicId))" }
+        let controller = UserProfileViewController(
+            api: api,
+            username: username,
+            messagePrefillTitle: topicTitle,
+            messagePrefillBody: prefill
+        )
+        navigationController?.pushViewController(controller, animated: true)
     }
 
     func postCell(didTapReaction reactionId: String, forPost post: DiscourseTopicDetail.Post) {
         Task {
-            try? await api.toggleReaction(postId: post.id, reactionId: reactionId)
-            if let fresh = try? await api.fetchPost(id: post.id) { await viewModel.replacePost(fresh) }
-            applySnapshot(reloadVisible: true)
+            do {
+                try await api.toggleReaction(postId: post.id, reactionId: reactionId)
+                if let fresh = try? await api.fetchPost(id: post.id) { await viewModel.replacePost(fresh) }
+                applySnapshot(reloadVisible: true)
+            } catch {
+                presentChallengePromptIfNeeded(error: error, on: api)
+            }
         }
     }
 
     func postCell(didToggleLikeForPost post: DiscourseTopicDetail.Post, liked: Bool) {
         Task {
-            if liked { try? await api.likePost(postId: post.id) } else { try? await api.unlikePost(postId: post.id) }
-            if let fresh = try? await api.fetchPost(id: post.id) { await viewModel.replacePost(fresh) }
-            applySnapshot(reloadVisible: true)
+            do {
+                if liked { try await api.likePost(postId: post.id) }
+                else { try await api.unlikePost(postId: post.id) }
+                if let fresh = try? await api.fetchPost(id: post.id) { await viewModel.replacePost(fresh) }
+                applySnapshot(reloadVisible: true)
+            } catch {
+                presentChallengePromptIfNeeded(error: error, on: api)
+            }
         }
     }
 
     func postCell(didTapBoostForPost post: DiscourseTopicDetail.Post) {
+        requireAuthentication { [weak self] in self?.presentBoostComposer(for: post) }
+    }
+
+    private func presentBoostComposer(for post: DiscourseTopicDetail.Post) {
         let alert = UIAlertController(title: String(localized: "reply.title.to \(post.username)"), message: nil, preferredStyle: .alert)
         alert.addTextField { $0.placeholder = String(localized: "reply.placeholder") }
         alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
         alert.addAction(UIAlertAction(title: String(localized: "reply.send"), style: .default) { [weak self, weak alert] _ in
-            guard let self, let raw = alert?.textFields?.first?.text, !raw.isEmpty else { return }
+            guard let self,
+                  let raw = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !raw.isEmpty
+            else { return }
             Task {
-                if let boost = try? await self.api.createBoost(postId: post.id, raw: raw) {
+                do {
+                    let boost = try await self.api.createBoost(postId: post.id, raw: raw)
                     self.viewModel.appendBoost(boost, toPostId: post.id)
+                    if AppSettings.shared.boostDisplayMode == .danmaku {
+                        self.shootBoostDanmaku([boost], forPostId: post.id)
+                    }
                     self.applySnapshot(reloadVisible: true)
+                } catch {
+                    if self.presentChallengePromptIfNeeded(error: error, on: self.api) { return }
+                    self.presentError(error)
                 }
             }
         })
@@ -1264,30 +1724,86 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
     }
 
     func postCell(didTapDeleteBoost boost: DiscourseTopicDetail.Boost) {
-        Task { try? await api.deleteBoost(id: boost.id); applySnapshot(reloadVisible: true) }
+        let alert = UIAlertController(
+            title: String(localized: "action.delete"),
+            message: String(localized: "topic_detail.boost.delete.confirm"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "action.delete"), style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            Task {
+                do {
+                    try await self.api.deleteBoost(id: boost.id)
+                    if let postId = self.viewModel.posts.first(where: { post in
+                        post.boosts.contains(where: { $0.id == boost.id })
+                    })?.id {
+                        self.viewModel.removeBoost(boostId: boost.id, fromPostId: postId)
+                    }
+                    self.applySnapshot(reloadVisible: true)
+                } catch {
+                    if self.presentChallengePromptIfNeeded(error: error, on: self.api) { return }
+                    self.presentError(error)
+                }
+            }
+        })
+        present(alert, animated: true)
     }
 
     func postCell(didTapToggleBoostsForPost post: DiscourseTopicDetail.Post, sourceView: UIView) {
-        viewModel.toggleBoosts(forPostId: post.id)
-        applySnapshot(reloadVisible: false, preserving: captureAnchor())
+        switch AppSettings.shared.boostDisplayMode {
+        case .expand:
+            viewModel.toggleBoosts(forPostId: post.id)
+            applySnapshot(reloadVisible: false, preserving: captureAnchor())
+        case .danmaku:
+            shootBoostDanmaku(post.boosts, forPostId: post.id)
+        }
+    }
+
+    private func shootBoostDanmaku(_ boosts: [DiscourseTopicDetail.Boost], forPostId postId: Int) {
+        guard !boosts.isEmpty else { return }
+        let topItem: VirtualTopicItem = dataSource.indexPath(for: .header(postId)) != nil ? .header(postId) : .collapsed(postId)
+        let bottomItem: VirtualTopicItem = dataSource.indexPath(for: .footer(postId)) != nil ? .footer(postId) : topItem
+        guard let topPath = dataSource.indexPath(for: topItem),
+              let bottomPath = dataSource.indexPath(for: bottomItem),
+              let topAttributes = collectionView.layoutAttributesForItem(at: topPath),
+              let bottomAttributes = collectionView.layoutAttributesForItem(at: bottomPath)
+        else { return }
+        let topRect = collectionView.convert(topAttributes.frame, to: view)
+        let bottomRect = collectionView.convert(bottomAttributes.frame, to: view)
+        let top = max(view.safeAreaInsets.top, topRect.minY) + 8
+        let bottom = min(view.bounds.height - view.safeAreaInsets.bottom, bottomRect.maxY)
+        boostDanmaku.shoot(boosts: boosts, assetBaseURL: api.assetBaseURL, top: top, bottom: bottom)
+    }
+
+    private func presentError(_ error: Error) {
+        let alert = UIAlertController(title: nil, message: error.localizedDescription, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+        present(alert, animated: true)
     }
 
     func postCell(didVotePoll pollName: String, options: [String], forPost post: DiscourseTopicDetail.Post) {
         Task {
-            if let response = try? await api.votePoll(postId: post.id, pollName: pollName, options: options) {
+            do {
+                let response = try await api.votePoll(postId: post.id, pollName: pollName, options: options)
                 await viewModel.updatePoll(response.poll, votes: response.vote ?? options, forPostId: post.id, pollName: pollName)
                 invalidateHeightMeasurements(forPostId: post.id)
                 applySnapshot(reloadVisible: true)
+            } catch {
+                if !presentChallengePromptIfNeeded(error: error, on: api) { presentError(error) }
             }
         }
     }
 
     func postCell(didRemovePollVote pollName: String, forPost post: DiscourseTopicDetail.Post) {
         Task {
-            if let response = try? await api.removePollVote(postId: post.id, pollName: pollName) {
+            do {
+                let response = try await api.removePollVote(postId: post.id, pollName: pollName)
                 await viewModel.updatePoll(response.poll, votes: response.vote ?? [], forPostId: post.id, pollName: pollName)
                 invalidateHeightMeasurements(forPostId: post.id)
                 applySnapshot(reloadVisible: true)
+            } catch {
+                if !presentChallengePromptIfNeeded(error: error, on: api) { presentError(error) }
             }
         }
     }
@@ -1297,12 +1813,42 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
         for (title, type) in [(String(localized: "post.flag.off_topic"), 3), (String(localized: "post.flag.inappropriate"), 4), (String(localized: "post.flag.spam"), 8)] {
             alert.addAction(UIAlertAction(title: title, style: .destructive) { [weak self] _ in
                 guard let self else { return }
-                Task { try? await self.api.flagPost(postId: post.id, flagTypeId: type) }
+                self.submitFlag(post: post, type: type, message: nil)
             })
         }
+        alert.addAction(UIAlertAction(title: String(localized: "post.flag.notify_moderators"), style: .default) { [weak self] _ in
+            self?.presentFlagWithMessage(post: post)
+        })
         alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController { popover.sourceView = sourceView; popover.sourceRect = sourceView.bounds }
         present(alert, animated: true)
+    }
+
+    private func presentFlagWithMessage(post: DiscourseTopicDetail.Post) {
+        let alert = UIAlertController(title: String(localized: "post.flag.notify_moderators"), message: nil, preferredStyle: .alert)
+        alert.addTextField { $0.placeholder = String(localized: "post.flag.reason_placeholder") }
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "post.flag.send"), style: .destructive) { [weak self, weak alert] _ in
+            guard let self,
+                  let message = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !message.isEmpty
+            else { return }
+            self.submitFlag(post: post, type: 7, message: message)
+        })
+        present(alert, animated: true)
+    }
+
+    private func submitFlag(post: DiscourseTopicDetail.Post, type: Int, message: String?) {
+        Task {
+            do {
+                try await api.flagPost(postId: post.id, flagTypeId: type, message: message)
+                let alert = UIAlertController(title: nil, message: String(localized: "post.flag.sent"), preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+                present(alert, animated: true)
+            } catch {
+                if !presentChallengePromptIfNeeded(error: error, on: api) { presentError(error) }
+            }
+        }
     }
 
     func postCell(didLongPressPost post: DiscourseTopicDetail.Post) {
@@ -1331,15 +1877,41 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
 
     private func presentReplyComposer(for post: DiscourseTopicDetail.Post?) {
         let composer = ReplyComposerViewController(api: api, topicId: topicId, replyToPost: post, baseURL: baseURL)
-        composer.onPostCreated = { [weak self] _, floor in
+        composer.onPostCreated = { [weak self] newPostId, floor in
             guard let self else { return }
             Task {
-                await self.viewModel.loadTopic(id: self.topicId, containerWidth: self.view.bounds.width, nearPostNumber: floor)
+                if self.viewModel.isTreeMode {
+                    let parentId = post?.id
+                    var inserted = false
+                    if let created = try? await self.api.fetchPost(id: newPostId) {
+                        inserted = await self.viewModel.insertReplyIntoTree(created, parentId: parentId)
+                    }
+                    if !inserted {
+                        await self.viewModel.loadNestedTopic(
+                            id: self.topicId,
+                            sort: self.viewModel.treeSort,
+                            containerWidth: self.view.bounds.width
+                        )
+                        self.viewModel.expandAncestors(ofPostNumber: floor)
+                    }
+                } else {
+                    await self.viewModel.loadTopic(
+                        id: self.topicId,
+                        containerWidth: self.view.bounds.width,
+                        nearPostNumber: floor
+                    )
+                }
+                self.preparedLayout = nil
                 self.applySnapshot(reloadVisible: false)
                 self.collectionView.layoutIfNeeded()
                 self.scrollToFloor(floor, position: .bottom)
             }
         }
-        present(UINavigationController(rootViewController: composer), animated: true)
+        let navigation = UINavigationController(rootViewController: composer)
+        if let sheet = navigation.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(navigation, animated: true)
     }
 }

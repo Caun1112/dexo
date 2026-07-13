@@ -58,10 +58,13 @@ final class BoostCell: UITableViewCell {
         post: DiscourseTopicDetail.Post,
         delegate: PostCellDelegate?,
         assetBaseURL: String,
-        contentWidth: CGFloat
+        contentWidth: CGFloat,
+        showsSeparator: Bool = true
     ) {
         backgroundColor = ThemeManager.shared.cardBackgroundColor
         contentView.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        separatorLine.backgroundColor = .separator
+        separatorLine.isHidden = !showsSeparator
         let boosts = post.boosts
         clearRows()
 

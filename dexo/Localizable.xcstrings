@@ -4369,6 +4369,22 @@
         }
       }
     },
+    "topic_detail.loading_more" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading more posts"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在加载更多帖子"
+          }
+        }
+      }
+    },
     "topic_detail.loading_earlier" : {
       "localizations" : {
         "en" : {

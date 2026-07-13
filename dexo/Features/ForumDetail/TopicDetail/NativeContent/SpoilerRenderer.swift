@@ -22,7 +22,8 @@ enum SpoilerRenderer: BlockRenderer {
 class SpoilerOverlayView: UIView {
     private let blurView: UIVisualEffectView
     private let contentView: UIView
-    private var isRevealed = false
+    private(set) var isRevealed = false
+    var onRevealChange: ((Bool) -> Void)?
 
     init(contentView: UIView, cornerRadius: CGFloat = 0, blurStyle: UIBlurEffect.Style = .systemThinMaterial) {
         self.contentView = contentView
@@ -62,12 +63,17 @@ class SpoilerOverlayView: UIView {
     }
 
     @objc private func toggle() {
-        isRevealed.toggle()
-        let targetAlpha: CGFloat = isRevealed ? 0 : 1
-        contentView.isUserInteractionEnabled = isRevealed
-        UIView.animate(withDuration: 0.25) {
-            self.blurView.alpha = targetAlpha
-        }
+        setRevealed(!isRevealed, animated: true)
+    }
+
+    func setRevealed(_ revealed: Bool, animated: Bool = false) {
+        guard revealed != isRevealed || blurView.alpha != (revealed ? 0 : 1) else { return }
+        isRevealed = revealed
+        contentView.isUserInteractionEnabled = revealed
+        let changes = { self.blurView.alpha = revealed ? 0 : 1 }
+        if animated { UIView.animate(withDuration: 0.25, animations: changes) }
+        else { changes() }
+        onRevealChange?(revealed)
     }
 }
 
