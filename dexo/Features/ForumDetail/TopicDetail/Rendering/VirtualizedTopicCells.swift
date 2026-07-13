@@ -102,6 +102,15 @@ final class VirtualTreeCollapsePill: UIButton {
 
 final class VirtualTopicTitleCell: UICollectionViewCell {
     static let reuseIdentifier = "VirtualTopicTitleCell"
+    private static let horizontalInset: CGFloat = 16
+    private static let tagHorizontalSpacing: CGFloat = 6
+    private static let tagVerticalSpacing: CGFloat = 6
+
+    private struct TagLayout {
+        let frames: [CGRect]
+        let height: CGFloat
+    }
+
     private let label = UILabel()
     private let tagsView = UIView()
     private var tagsHeightConstraint: NSLayoutConstraint!
@@ -147,8 +156,14 @@ final class VirtualTopicTitleCell: UICollectionViewCell {
     }
 
     override func layoutSubviews() {
+        let availableWidth = max(0, contentView.bounds.width - Self.horizontalInset * 2)
+        let buttons = tagsView.subviews.compactMap { $0 as? UIButton }
+        let tagLayout = Self.tagLayout(for: buttons, width: availableWidth)
+        tagsHeightConstraint.constant = tagLayout.height
         super.layoutSubviews()
-        layoutTagButtons(width: tagsView.bounds.width)
+        for (button, frame) in zip(buttons, tagLayout.frames) {
+            button.frame = frame
+        }
     }
 
     override func prepareForReuse() {
@@ -156,53 +171,68 @@ final class VirtualTopicTitleCell: UICollectionViewCell {
         tags = []
         onTag = nil
         tagsView.subviews.forEach { $0.removeFromSuperview() }
+        tagsHeightConstraint.constant = 0
     }
 
     private func rebuildTagButtons() {
         tagsView.subviews.forEach { $0.removeFromSuperview() }
         for tag in tags {
-            let button = UIButton(type: .system)
-            var configuration = UIButton.Configuration.filled()
-            configuration.title = tag.name
-            configuration.image = UIImage(systemName: "tag")
-            configuration.imagePadding = 4
-            configuration.baseForegroundColor = ThemeManager.shared.accentColor
-            configuration.baseBackgroundColor = ThemeManager.shared.codeBackgroundColor
-            configuration.cornerStyle = .capsule
-            configuration.contentInsets = .init(top: 4, leading: 10, bottom: 4, trailing: 10)
-            configuration.preferredSymbolConfigurationForImage = .init(pointSize: 10, weight: .medium)
-            configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-                var copy = attributes
-                copy.font = FontManager.shared.font(size: 13, weight: .medium)
-                return copy
+            let button = Self.makeTagButton(title: tag.name) { [weak self] in
+                self?.onTag?(tag)
             }
-            button.configuration = configuration
-            button.addAction(UIAction { [weak self] _ in self?.onTag?(tag) }, for: .touchUpInside)
             tagsView.addSubview(button)
         }
         tagsView.isHidden = tags.isEmpty
+        let availableWidth = max(0, contentView.bounds.width - Self.horizontalInset * 2)
+        tagsHeightConstraint.constant = Self.tagLayout(
+            for: tagsView.subviews.compactMap { $0 as? UIButton },
+            width: availableWidth
+        ).height
     }
 
-    private func layoutTagButtons(width: CGFloat) {
-        guard !tags.isEmpty, width > 0 else {
-            tagsHeightConstraint.constant = 0
-            return
+    private static func makeTagButton(title: String, onTap: (() -> Void)? = nil) -> UIButton {
+        let button = UIButton(type: .system)
+        var configuration = UIButton.Configuration.filled()
+        configuration.title = title
+        configuration.image = UIImage(systemName: "tag")
+        configuration.imagePadding = 4
+        configuration.baseForegroundColor = ThemeManager.shared.accentColor
+        configuration.baseBackgroundColor = ThemeManager.shared.codeBackgroundColor
+        configuration.cornerStyle = .capsule
+        configuration.contentInsets = .init(top: 4, leading: 10, bottom: 4, trailing: 10)
+        configuration.preferredSymbolConfigurationForImage = .init(pointSize: 10, weight: .medium)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var copy = attributes
+            copy.font = FontManager.shared.font(size: 13, weight: .medium)
+            return copy
         }
+        button.configuration = configuration
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
+        if let onTap {
+            button.addAction(UIAction { _ in onTap() }, for: .touchUpInside)
+        }
+        return button
+    }
+
+    private static func tagLayout(for buttons: [UIButton], width: CGFloat) -> TagLayout {
+        guard !buttons.isEmpty, width > 0 else { return TagLayout(frames: [], height: 0) }
         var x: CGFloat = 0
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
-        for button in tagsView.subviews.compactMap({ $0 as? UIButton }) {
-            let size = button.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        var frames: [CGRect] = []
+        for button in buttons {
+            let measured = button.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+            let size = CGSize(width: min(width, ceil(measured.width)), height: ceil(measured.height))
             if x > 0, x + size.width > width {
                 x = 0
-                y += rowHeight + 6
+                y += rowHeight + tagVerticalSpacing
                 rowHeight = 0
             }
-            button.frame = CGRect(origin: CGPoint(x: x, y: y), size: size)
-            x += size.width + 6
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
+            x += size.width + tagHorizontalSpacing
             rowHeight = max(rowHeight, size.height)
         }
-        tagsHeightConstraint.constant = y + rowHeight
+        return TagLayout(frames: frames, height: y + rowHeight)
     }
 
     static func height(title: String, tags: [DiscourseTopicDetail.Tag], width: CGFloat) -> CGFloat {
@@ -214,18 +244,10 @@ final class VirtualTopicTitleCell: UICollectionViewCell {
             context: nil
         )
         guard !tags.isEmpty else { return ceil(titleRect.height) + 28 }
-        let available = max(1, width - 32)
-        let tagFont = FontManager.shared.font(size: 13, weight: .medium)
-        var x: CGFloat = 0
-        var rows: CGFloat = 1
-        let rowHeight = max(28, ceil(tagFont.lineHeight) + 8)
-        for tag in tags {
-            let text = (tag.name as NSString).size(withAttributes: [.font: tagFont]).width
-            let itemWidth = min(available, ceil(text) + 44)
-            if x > 0, x + itemWidth > available { rows += 1; x = 0 }
-            x += itemWidth + 6
-        }
-        return ceil(titleRect.height) + 12 + 8 + rows * rowHeight + (rows - 1) * 6 + 8
+        let available = max(1, width - horizontalInset * 2)
+        let buttons = tags.map { makeTagButton(title: $0.name) }
+        let tagsHeight = tagLayout(for: buttons, width: available).height
+        return ceil(titleRect.height) + 12 + 8 + tagsHeight + 8
     }
 }
 

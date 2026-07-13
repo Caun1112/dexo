@@ -357,6 +357,30 @@ final class TopicRenderCacheTests: XCTestCase {
         XCTAssertGreaterThan(tagged, plain)
     }
 
+    func testVirtualTitleFirstLayoutKeepsAllTagsInsidePrecomputedHeight() {
+        let width: CGFloat = 240
+        let tags = [
+            DiscourseTopicDetail.Tag(id: 1, name: "a-very-long-topic-tag", slug: "a"),
+            DiscourseTopicDetail.Tag(id: 2, name: "another-long-topic-tag", slug: "b"),
+            DiscourseTopicDetail.Tag(id: 3, name: "third-topic-tag", slug: "c"),
+        ]
+        let height = VirtualTopicTitleCell.height(title: "Topic", tags: tags, width: width)
+        let cell = VirtualTopicTitleCell(frame: CGRect(x: 0, y: 0, width: width, height: height))
+
+        cell.configure(title: "Topic", tags: tags)
+        cell.layoutIfNeeded()
+
+        let buttons = cell.contentView.subviews
+            .flatMap(\.subviews)
+            .compactMap { $0 as? UIButton }
+        XCTAssertEqual(buttons.count, tags.count)
+        for button in buttons {
+            let frame = button.convert(button.bounds, to: cell.contentView)
+            XCTAssertLessThanOrEqual(frame.maxX, width - 16 + 0.5)
+            XCTAssertLessThanOrEqual(frame.maxY, height - 8 + 0.5)
+        }
+    }
+
     func testVirtualFooterButtonTintsMatchLegacyStates() {
         let normal = VirtualPostFooterButtonTints.resolve(isLiked: false, hasCurrentUserBoost: false)
         XCTAssertEqual(normal.reply, .tertiaryLabel)
