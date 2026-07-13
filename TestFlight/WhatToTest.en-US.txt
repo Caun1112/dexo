@@ -3,6 +3,7 @@ What to Test
 - Open the Me tab several times and confirm cached profile information appears immediately without repeated loading states.
 - Pull to refresh the Me tab and confirm the latest profile data is fetched while the existing profile remains visible during refresh.
 - Verify the profile card, avatar, bio, join date, and four statistics display correctly in both light and dark themes.
+- Verify the circular message button appears beside the profile identity on both your profile and other profiles. Switch themes and use a large text size to confirm the layout does not overlap, then verify each button opens the inbox or composer as appropriate.
 - Open a topic with long text, switch the system between light and dark mode, and confirm all body text and code areas update their colors immediately.
 - Scroll through a topic before switching appearance and confirm the reading position is preserved and newly loaded posts use the current theme.
 - Switch the system appearance while a topic is loaded or loading more posts, and confirm the app does not crash and the reading position is preserved.

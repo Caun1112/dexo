@@ -147,10 +147,17 @@ final class MeViewController: ObservableViewController {
                 user: currentUser,
                 userProfile: userProfile,
                 summary: summary,
+                messageAction: .inbox,
                 assetBaseURL: api.assetBaseURL
             )
         } else {
-            profileHeader.configure(user: nil, userProfile: nil, summary: nil, assetBaseURL: api.assetBaseURL)
+            profileHeader.configure(
+                user: nil,
+                userProfile: nil,
+                summary: nil,
+                messageAction: .inbox,
+                assetBaseURL: api.assetBaseURL
+            )
         }
 
         layoutHeaderView()

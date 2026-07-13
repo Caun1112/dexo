@@ -117,6 +117,7 @@ final class UserProfileViewController: ObservableViewController {
                 user: user,
                 userProfile: profile,
                 summary: viewModel.summary,
+                messageAction: viewModel.isOwnProfile ? .inbox : .compose,
                 assetBaseURL: api.assetBaseURL
             )
         }

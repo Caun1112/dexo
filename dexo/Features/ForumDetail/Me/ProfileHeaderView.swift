@@ -10,13 +10,19 @@ final class ProfileHeaderView: UIView {
         case days = 3
     }
 
+    enum MessageAction {
+        case inbox
+        case compose
+    }
+
     var onLoginTapped: (() -> Void)?
     var onStatTapped: ((StatType) -> Void)?
-    /// Invoked when the message button on the stats row is tapped.
+    /// Invoked when the message button beside the profile identity is tapped.
     /// Own profile → navigate to the DM inbox; other profile → compose a new DM.
     var onMessageTapped: (() -> Void)?
 
     private static let baseAvatarSize: CGFloat = 68
+    private static let messageButtonSize: CGFloat = 44
     private var avatarWidthConstraint: NSLayoutConstraint!
     private var avatarHeightConstraint: NSLayoutConstraint!
 
@@ -33,6 +39,8 @@ final class ProfileHeaderView: UIView {
         let label = UILabel()
         label.font = FontManager.shared.font(size: 14)
         label.textColor = .secondaryLabel
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -40,6 +48,8 @@ final class ProfileHeaderView: UIView {
     private let displayNameLabel: UILabel = {
         let label = UILabel()
         label.font = FontManager.shared.font(size: 18, weight: .bold)
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -84,17 +94,10 @@ final class ProfileHeaderView: UIView {
 
     private lazy var messageButton: UIButton = {
         var config = UIButton.Configuration.tinted()
-        let symbol = UIImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+        let symbol = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
         config.image = UIImage(systemName: "envelope", withConfiguration: symbol)
-        config.imagePadding = 5
-        config.title = String(localized: "me.messages")
         config.cornerStyle = .capsule
-        config.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 11, bottom: 5, trailing: 13)
-        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-            var out = incoming
-            out.font = FontManager.shared.font(size: 12, weight: .semibold)
-            return out
-        }
+        config.contentInsets = .zero
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.setContentHuggingPriority(.required, for: .horizontal)
@@ -103,15 +106,6 @@ final class ProfileHeaderView: UIView {
             self?.onMessageTapped?()
         }, for: .touchUpInside)
         return button
-    }()
-
-    private lazy var messageButtonRow: UIStackView = {
-        let row = UIStackView(arrangedSubviews: [messageButton])
-        row.axis = .horizontal
-        row.alignment = .center
-        row.distribution = .fill
-        row.translatesAutoresizingMaskIntoConstraints = false
-        return row
     }()
 
     // Login prompt state
@@ -167,13 +161,17 @@ final class ProfileHeaderView: UIView {
         // 头像 + 名字横排
         let nameStack = UIStackView(arrangedSubviews: [displayNameLabel, usernameLabel])
         nameStack.axis = .vertical
-        nameStack.alignment = .leading
+        nameStack.alignment = .fill
         nameStack.spacing = 2
+        nameStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        nameStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let avatarNameRow = UIStackView(arrangedSubviews: [avatarImageView, nameStack])
+        let avatarNameRow = UIStackView(arrangedSubviews: [avatarImageView, nameStack, messageButton])
         avatarNameRow.axis = .horizontal
         avatarNameRow.alignment = .center
         avatarNameRow.spacing = 12
+        avatarNameRow.setCustomSpacing(8, after: nameStack)
+        avatarNameRow.translatesAutoresizingMaskIntoConstraints = false
 
         loggedInContainer.addArrangedSubview(avatarNameRow)
         loggedInContainer.addArrangedSubview(titleLabel)
@@ -188,8 +186,6 @@ final class ProfileHeaderView: UIView {
 
         loggedInContainer.addArrangedSubview(joinDateLabel)
         loggedInContainer.setCustomSpacing(12, after: statsStackView)
-        loggedInContainer.addArrangedSubview(messageButtonRow)
-        loggedInContainer.setCustomSpacing(12, after: joinDateLabel)
 
         loggedOutContainer.addArrangedSubview(loginPromptLabel)
 //        loggedOutContainer.addArrangedSubview(loginButton)
@@ -203,6 +199,8 @@ final class ProfileHeaderView: UIView {
         NSLayoutConstraint.activate([
             avatarWidthConstraint,
             avatarHeightConstraint,
+            messageButton.widthAnchor.constraint(equalToConstant: Self.messageButtonSize),
+            messageButton.heightAnchor.constraint(equalToConstant: Self.messageButtonSize),
 
             // Horizontal insets align with the `.insetGrouped` cell content start
             // (section inset 20pt + cell layout margin ~12pt), using
@@ -217,6 +215,8 @@ final class ProfileHeaderView: UIView {
             loggedOutContainer.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -32),
             loggedOutContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
 
+            avatarNameRow.leadingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.leadingAnchor),
+            avatarNameRow.trailingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.trailingAnchor),
             statsStackView.leadingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.leadingAnchor),
             statsStackView.trailingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.trailingAnchor),
         ])
@@ -230,7 +230,13 @@ final class ProfileHeaderView: UIView {
 //        loginButton.addTarget(self, action: #selector(loginTapped), for: .touchUpInside)
     }
 
-    func configure(user: DiscourseCurrentUser?, userProfile: DiscourseUserProfile?, summary: DiscourseUserSummary?, assetBaseURL: String) {
+    func configure(
+        user: DiscourseCurrentUser?,
+        userProfile: DiscourseUserProfile?,
+        summary: DiscourseUserSummary?,
+        messageAction: MessageAction,
+        assetBaseURL: String
+    ) {
         let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
         let theme = ThemeManager.shared
         avatarWidthConstraint.constant = avatarSize
@@ -238,6 +244,7 @@ final class ProfileHeaderView: UIView {
         avatarImageView.layer.cornerRadius = avatarSize / 2
         avatarImageView.backgroundColor = theme.backgroundColor
         loggedInContainer.backgroundColor = theme.cardBackgroundColor
+        configureMessageButton(action: messageAction, theme: theme)
 
         if let user {
             loggedInContainer.isHidden = false
@@ -280,6 +287,23 @@ final class ProfileHeaderView: UIView {
         } else {
             loggedInContainer.isHidden = true
             loggedOutContainer.isHidden = false
+        }
+    }
+
+    private func configureMessageButton(action: MessageAction, theme: ThemeManager) {
+        var config = messageButton.configuration ?? UIButton.Configuration.tinted()
+        let symbol = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+        config.image = UIImage(systemName: "envelope", withConfiguration: symbol)
+        config.title = nil
+        config.baseForegroundColor = theme.accentColor
+        config.baseBackgroundColor = theme.accentColor
+        messageButton.configuration = config
+
+        switch action {
+        case .inbox:
+            messageButton.accessibilityLabel = String(localized: "me.messages")
+        case .compose:
+            messageButton.accessibilityLabel = String(localized: "user.send_message")
         }
     }
 
