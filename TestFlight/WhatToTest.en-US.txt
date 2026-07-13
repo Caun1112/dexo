@@ -5,6 +5,7 @@ What to Test
 - Verify the profile card, avatar, bio, join date, and four statistics display correctly in both light and dark themes.
 - Open a topic with long text, switch the system between light and dark mode, and confirm all body text and code areas update their colors immediately.
 - Scroll through a topic before switching appearance and confirm the reading position is preserved and newly loaded posts use the current theme.
+- Switch the system appearance while a topic is loaded or loading more posts, and confirm the app does not crash and the reading position is preserved.
 - Try adding a Cloudflare-protected linux.do forum. Confirm the app shows a challenge prompt with an Open Challenge action.
 - Complete the challenge, return to Add Forum, and tap Add Forum again to verify the forum is added successfully.
 - Cancel the challenge or leave it incomplete and confirm the forum is not added.
