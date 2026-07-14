@@ -157,6 +157,38 @@ final class TopicRenderPipelineTests: XCTestCase {
         XCTAssertNil(VirtualTopicItem.loadMoreChildren(42).longPressPostId)
         XCTAssertNil(VirtualTopicItem.paginationStatus.longPressPostId)
     }
+
+    func testObservedSnapshotIsSuppressedDuringPagination() {
+        XCTAssertTrue(VirtualTopicObservedSnapshotPolicy.allowsApply(
+            isReady: true,
+            isReloadingTreeMode: false,
+            isPerformingJump: false,
+            isPaginating: false
+        ))
+        XCTAssertFalse(VirtualTopicObservedSnapshotPolicy.allowsApply(
+            isReady: true,
+            isReloadingTreeMode: false,
+            isPerformingJump: false,
+            isPaginating: true
+        ))
+    }
+
+    func testPrependAnchorSkipsTopicTitleAndSelectsExistingPost() {
+        let unitId = RenderUnitID(postId: 100, contentVersion: 1, ordinal: 0)
+        let items: [VirtualTopicItem] = [
+            .title(1),
+            .header(100),
+            .unit(unitId),
+            .footer(100),
+        ]
+
+        XCTAssertEqual(VirtualTopicPrependAnchorSelector.firstPostItem(in: items), .header(100))
+        XCTAssertNil(VirtualTopicPrependAnchorSelector.firstPostItem(in: [
+            .title(1),
+            .paginationStatus,
+            .loadMoreChildren(100),
+        ]))
+    }
 }
 
 @MainActor

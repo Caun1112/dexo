@@ -37,6 +37,23 @@ nonisolated enum VirtualTopicItem: Hashable, Sendable {
     }
 }
 
+nonisolated enum VirtualTopicObservedSnapshotPolicy {
+    static func allowsApply(
+        isReady: Bool,
+        isReloadingTreeMode: Bool,
+        isPerformingJump: Bool,
+        isPaginating: Bool
+    ) -> Bool {
+        isReady && !isReloadingTreeMode && !isPerformingJump && !isPaginating
+    }
+}
+
+nonisolated enum VirtualTopicPrependAnchorSelector {
+    static func firstPostItem(in items: [VirtualTopicItem]) -> VirtualTopicItem? {
+        items.first { $0.longPressPostId != nil }
+    }
+}
+
 /// Default topic renderer. Posts are flattened into independently reusable
 /// header/body/footer items, so a very tall post never forces UIKit to create
 /// or draw its complete view tree in one frame.
@@ -62,8 +79,10 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
     private var hasPendingSnapshot = false
     private var pendingSnapshotReloadVisible = false
     private var pendingSnapshotAnchor: (VirtualTopicItem, CGFloat)?
+    private var pendingLoadEarlierPostIds: [Int]?
     private var isLoadingPage = false
     private var loadEarlierArmed = true
+    private var lastScrollOffset: CGFloat = 0
     private var visibleItemCountsByPost: [Int: Int] = [:]
     private var imagePrefetchTokens: [VirtualTopicItem: SDWebImagePrefetchToken] = [:]
     private var jumpScrubber: JumpScrubberOverlay?
@@ -495,7 +514,14 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         } else {
             activityIndicator.stopAnimating()
         }
-        if viewModel.isReady, !isReloadingTreeMode, !isPerformingJump { applySnapshot(reloadVisible: false) }
+        if VirtualTopicObservedSnapshotPolicy.allowsApply(
+            isReady: viewModel.isReady,
+            isReloadingTreeMode: isReloadingTreeMode,
+            isPerformingJump: isPerformingJump,
+            isPaginating: isLoadingPage
+        ) {
+            applySnapshot(reloadVisible: false)
+        }
         if let topic = viewModel.topic {
             title = nil
             TopicCell.applyEmojiTitle(topic.fancyTitle ?? topic.title, to: navTitleLabel)
@@ -875,10 +901,87 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
                 )
             }
             if self.viewIfLoaded?.window != nil { self.resumeReadTracking() }
+            if self.flushPendingLoadEarlierIfReady() { return }
             if !self.flushPendingSnapshotIfNeeded() {
                 self.commitPendingDynamicHeights()
             }
         }
+    }
+
+    /// Applies a canonical-order prepend only after scrolling is fully idle.
+    /// The anchor is captured at apply time rather than request time, so both
+    /// "network finishes before the bounce" and "bounce finishes before the
+    /// network" preserve the item the user is actually looking at.
+    private func applyLoadEarlierSnapshot(addedPostIds: [Int]) {
+        guard !addedPostIds.isEmpty else {
+            isLoadingPage = false
+            return
+        }
+        let isMoving = collectionView.isTracking || collectionView.isDragging || collectionView.isDecelerating
+        guard !isMoving, !isApplyingSnapshot else {
+            pendingLoadEarlierPostIds = addedPostIds
+            return
+        }
+
+        let anchor = capturePostAnchor()
+        let oldContentHeight = collectionView.contentSize.height
+        let oldContentOffset = collectionView.contentOffset.y
+        prepareCurrentLayout()
+        let snapshot = makeSnapshot()
+        let current = dataSource.snapshot()
+        guard snapshot.itemIdentifiers != current.itemIdentifiers else {
+            isLoadingPage = false
+            return
+        }
+
+        isApplyingSnapshot = true
+        timelineLayout.reloadAllHeights()
+        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+            guard let self else { return }
+            self.collectionView.layoutIfNeeded()
+
+            var restoredAnchor = false
+            if let anchor, let indexPath = self.dataSource.indexPath(for: anchor.0) {
+                UIView.performWithoutAnimation {
+                    // A first placement forces the custom layout to expose the
+                    // anchor's post-prepend frame; the second pass absorbs any
+                    // collection-view content-size adjustment from the apply.
+                    self.collectionView.scrollToItem(at: indexPath, at: .top, animated: false)
+                    self.collectionView.layoutIfNeeded()
+                    self.collectionView.scrollToItem(at: indexPath, at: .top, animated: false)
+                    self.collectionView.layoutIfNeeded()
+                    if let attributes = self.collectionView.layoutAttributesForItem(at: indexPath) {
+                        self.collectionView.contentOffset.y = attributes.frame.minY - anchor.1
+                        restoredAnchor = true
+                    }
+                }
+            }
+            if !restoredAnchor {
+                let delta = self.collectionView.contentSize.height - oldContentHeight
+                self.collectionView.contentOffset.y = oldContentOffset + max(0, delta)
+            }
+
+            self.lastScrollOffset = self.collectionView.contentOffset.y
+            self.isApplyingSnapshot = false
+            self.isLoadingPage = false
+            if self.viewIfLoaded?.window != nil { self.resumeReadTracking() }
+            if !self.flushPendingSnapshotIfNeeded() {
+                self.commitPendingDynamicHeights()
+            }
+        }
+    }
+
+    @discardableResult
+    private func flushPendingLoadEarlierIfReady() -> Bool {
+        guard let addedPostIds = pendingLoadEarlierPostIds,
+              !isApplyingSnapshot,
+              !collectionView.isTracking,
+              !collectionView.isDragging,
+              !collectionView.isDecelerating
+        else { return false }
+        pendingLoadEarlierPostIds = nil
+        applyLoadEarlierSnapshot(addedPostIds: addedPostIds)
+        return true
     }
 
     @discardableResult
@@ -906,6 +1009,33 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
               let attributes = collectionView.layoutAttributesForItem(at: indexPath)
         else { return nil }
         return (item, attributes.frame.minY - collectionView.contentOffset.y)
+    }
+
+    /// The topic title is a collection item in the virtualized renderer, but
+    /// it must never own a prepend anchor. Legacy renders it as tableHeaderView
+    /// and therefore always anchors a post row when earlier floors are added.
+    private func capturePostAnchor() -> (VirtualTopicItem, CGFloat)? {
+        let visibleCandidates = collectionView.indexPathsForVisibleItems.sorted().compactMap { indexPath -> (IndexPath, VirtualTopicItem)? in
+            guard let item = dataSource.itemIdentifier(for: indexPath) else { return nil }
+            return (indexPath, item)
+        }
+        if let item = VirtualTopicPrependAnchorSelector.firstPostItem(in: visibleCandidates.map(\.1)),
+           let indexPath = visibleCandidates.first(where: { $0.1 == item })?.0,
+           let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+        {
+            return (item, attributes.frame.minY - collectionView.contentOffset.y)
+        }
+
+        // A very tall title can temporarily cover the entire viewport. Keep
+        // the first loaded post's off-screen distance in that case instead of
+        // falling back to the title and revealing the newly prepended batch.
+        if let item = VirtualTopicPrependAnchorSelector.firstPostItem(in: dataSource.snapshot().itemIdentifiers),
+           let indexPath = dataSource.indexPath(for: item),
+           let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+        {
+            return (item, attributes.frame.minY - collectionView.contentOffset.y)
+        }
+        return nil
     }
 
     private func scrollToFloor(_ floor: Int, position: UICollectionView.ScrollPosition) {
@@ -990,6 +1120,8 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         hasPendingSnapshot = false
         pendingSnapshotReloadVisible = false
         pendingSnapshotAnchor = nil
+        pendingLoadEarlierPostIds = nil
+        isLoadingPage = false
 
         // Recompute every height for the new indentation/content width before
         // publishing the new snapshot, then force UICollectionView to discard
@@ -1253,27 +1385,43 @@ extension VirtualizedTopicDetailViewController: UICollectionViewDelegate, UIColl
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         loadEarlierArmed = true
+        lastScrollOffset = scrollView.contentOffset.y
         cancelPendingReadFlush()
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate {
+            if flushPendingLoadEarlierIfReady() {
+                scheduleDebouncedReadFlush()
+                return
+            }
             if !flushPendingSnapshotIfNeeded() { commitPendingDynamicHeights() }
             scheduleDebouncedReadFlush()
         }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        if flushPendingLoadEarlierIfReady() {
+            scheduleDebouncedReadFlush()
+            return
+        }
         if !flushPendingSnapshotIfNeeded() { commitPendingDynamicHeights() }
         scheduleDebouncedReadFlush()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        if flushPendingLoadEarlierIfReady() {
+            scheduleDebouncedReadFlush()
+            return
+        }
         if !flushPendingSnapshotIfNeeded() { commitPendingDynamicHeights() }
         scheduleDebouncedReadFlush()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        let currentOffset = scrollView.contentOffset.y
+        let isMovingTowardEarlierPosts = currentOffset < lastScrollOffset
+        lastScrollOffset = currentOffset
         if let titlePath = dataSource.indexPath(for: .title(topicId)),
            let attributes = collectionView.layoutAttributesForItem(at: titlePath)
         {
@@ -1281,22 +1429,26 @@ extension VirtualizedTopicDetailViewController: UICollectionViewDelegate, UIColl
                 ? navTitleLabel
                 : nil
         }
-        guard loadEarlierArmed, !isLoadingPage, viewModel.canLoadEarlier, !viewModel.isReverseOrder,
+        guard (scrollView.isTracking || scrollView.isDragging),
+              isMovingTowardEarlierPosts,
+              loadEarlierArmed, !isLoadingPage, viewModel.canLoadEarlier, !viewModel.isReverseOrder,
               scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top + 180
         else { return }
         loadEarlierArmed = false
         isLoadingPage = true
-        let anchor = captureAnchor()
         let operationGeneration = contentOperationGeneration
         Task {
-            _ = await viewModel.loadEarlierPosts(containerWidth: view.bounds.width)
+            let addedPostIds = await viewModel.loadEarlierPosts(containerWidth: view.bounds.width)
             guard operationGeneration == contentOperationGeneration else {
                 isLoadingPage = false
                 return
             }
-            applySnapshot(reloadVisible: false, preserving: anchor)
             handleLoadErrorIfNeeded()
-            isLoadingPage = false
+            guard !addedPostIds.isEmpty else {
+                isLoadingPage = false
+                return
+            }
+            applyLoadEarlierSnapshot(addedPostIds: addedPostIds)
         }
     }
 

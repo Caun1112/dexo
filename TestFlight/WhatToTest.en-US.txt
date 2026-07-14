@@ -1,5 +1,12 @@
 What to Test
 
+- In Settings, switch Topic Detail Rendering between Virtualized and Legacy. Confirm the selection takes effect the next time a topic is opened and both modes remain usable.
+- Open a very long topic in Virtualized mode and scroll rapidly in both directions. Confirm text, images, code, polls, details, tables, and other blocks appear without blank content, clipping, or visible height corrections while scrolling.
+- Jump to a distant post such as post 100, then pull down to load posts 80–99. Confirm the new posts are inserted above while post 100 stays at the same visible screen position.
+- In normal topic mode, verify the reply-reference indicator uses the original reply symbol and tapping the referenced username opens the replied-to post preview.
+- Switch a topic to nested mode and test sorting, deep reply lines, collapse/expand, loading more child replies, the floating reply button, rotation, and large text. Confirm connector lines remain continuous and item heights remain correct.
+- Verify multi-image browsing starts from the tapped image and supports paging and zoom transitions. Long-press a post header, body, or action area to open the raw post sheet and test Copy.
+- Verify reactions, likes, boosts, reply/more actions, separators, OP text color, topic tags, and theme changes match the Legacy renderer. Topic tags must be fully visible on their first appearance.
 - Open the Me tab several times and confirm cached profile information appears immediately without repeated loading states.
 - Pull to refresh the Me tab and confirm the latest profile data is fetched while the existing profile remains visible during refresh.
 - Verify the profile card, avatar, bio, join date, and four statistics display correctly in both light and dark themes.

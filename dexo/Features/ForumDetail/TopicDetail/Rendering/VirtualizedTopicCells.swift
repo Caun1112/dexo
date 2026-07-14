@@ -259,7 +259,7 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
     private let nameLabel = UILabel()
     private let usernameLabel = UILabel()
     private let userTitleLabel = UILabel()
-    private let replyReferenceButton = UIButton(type: .system)
+    private let replyReferenceLabel = UILabel()
     private let timeLabel = UILabel()
     private let floorLabel = UILabel()
     private let treeLineView = TreeLineView()
@@ -289,10 +289,11 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
         userTitleLabel.translatesAutoresizingMaskIntoConstraints = false
         userTitleLabel.textColor = .secondaryLabel
         userTitleLabel.lineBreakMode = .byTruncatingTail
-        replyReferenceButton.translatesAutoresizingMaskIntoConstraints = false
-        replyReferenceButton.setTitleColor(.secondaryLabel, for: .normal)
-        replyReferenceButton.contentHorizontalAlignment = .right
-        replyReferenceButton.addTarget(self, action: #selector(replyReferenceTapped), for: .touchUpInside)
+        replyReferenceLabel.translatesAutoresizingMaskIntoConstraints = false
+        replyReferenceLabel.textColor = .secondaryLabel
+        replyReferenceLabel.isHidden = true
+        replyReferenceLabel.isUserInteractionEnabled = true
+        replyReferenceLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(replyReferenceTapped)))
 
         for label in [nameLabel, usernameLabel, timeLabel, floorLabel] {
             label.translatesAutoresizingMaskIntoConstraints = false
@@ -301,7 +302,7 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
         contentView.addSubview(avatar)
         contentView.addSubview(flair)
         contentView.addSubview(userTitleLabel)
-        contentView.addSubview(replyReferenceButton)
+        contentView.addSubview(replyReferenceLabel)
 
         avatarLeadingConstraint = avatar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
         avatarWidthConstraint = avatar.widthAnchor.constraint(equalToConstant: 32)
@@ -325,11 +326,11 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
             nameLabel.topAnchor.constraint(equalTo: avatar.topAnchor),
             userTitleLabel.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 4),
             userTitleLabel.lastBaselineAnchor.constraint(equalTo: nameLabel.lastBaselineAnchor),
-            userTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: replyReferenceButton.leadingAnchor, constant: -6),
+            userTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: replyReferenceLabel.leadingAnchor, constant: -8),
             usernameLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             usernameLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor),
-            replyReferenceButton.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -6),
-            replyReferenceButton.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
+            replyReferenceLabel.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -8),
+            replyReferenceLabel.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
             timeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             timeLabel.topAnchor.constraint(equalTo: floorLabel.bottomAnchor, constant: 2),
             floorLabel.trailingAnchor.constraint(equalTo: timeLabel.trailingAnchor),
@@ -358,7 +359,7 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
         nameLabel.font = FontManager.shared.font(size: 14, weight: .semibold)
         usernameLabel.font = FontManager.shared.font(size: 12)
         userTitleLabel.font = FontManager.shared.font(size: 12)
-        replyReferenceButton.titleLabel?.font = FontManager.shared.font(size: 12)
+        replyReferenceLabel.font = FontManager.shared.font(size: 12)
         timeLabel.font = FontManager.shared.font(size: 12)
         floorLabel.font = FontManager.shared.monospacedDigitFont(size: 12)
         nameLabel.text = post.name ?? post.username
@@ -376,11 +377,19 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
             userTitleLabel.isHidden = true
         }
         if let replyUser = post.replyToUser, treeState == nil {
-            replyReferenceButton.setTitle("↩ @\(replyUser.username)", for: .normal)
-            replyReferenceButton.isHidden = false
+            let attachment = NSTextAttachment()
+            let symbolConfig = UIImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+            attachment.image = UIImage(
+                systemName: "arrowshape.turn.up.left.fill",
+                withConfiguration: symbolConfig
+            )?.withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
+            let attributedText = NSMutableAttributedString(attachment: attachment)
+            attributedText.append(NSAttributedString(string: " @\(replyUser.username)"))
+            replyReferenceLabel.attributedText = attributedText
+            replyReferenceLabel.isHidden = false
         } else {
-            replyReferenceButton.setTitle(nil, for: .normal)
-            replyReferenceButton.isHidden = true
+            replyReferenceLabel.attributedText = nil
+            replyReferenceLabel.isHidden = true
         }
         timeLabel.text = Self.displayDate(post.createdAt)
         timeLabel.textColor = .secondaryLabel
@@ -427,7 +436,7 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
             nameLabel.backgroundColor = .clear
             usernameLabel.isHidden = true
             userTitleLabel.isHidden = true
-            replyReferenceButton.isHidden = true
+            replyReferenceLabel.isHidden = true
             timeLabel.isHidden = true
             floorLabel.isHidden = true
             avatar.sd_cancelCurrentImageLoad()
@@ -446,6 +455,8 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
         flair.sd_cancelCurrentImageLoad()
         flair.image = nil
         flair.isHidden = true
+        replyReferenceLabel.attributedText = nil
+        replyReferenceLabel.isHidden = true
         onAvatar = nil
         onReplyReference = nil
     }
