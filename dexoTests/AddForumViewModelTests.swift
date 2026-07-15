@@ -25,11 +25,12 @@ final class AddForumViewModelTests: XCTestCase {
     }
 
     func testNonLinuxChallengeRemainsAConnectionFailure() async {
+        let challengeError = DiscourseAPIError(
+            messages: ["Cloudflare challenge required"],
+            errorType: "challenge_required"
+        )
         let loader: AddForumViewModel.BasicInfoLoader = { _ in
-            throw DiscourseAPIError(
-                messages: ["Cloudflare challenge required"],
-                errorType: "challenge_required"
-            )
+            throw challengeError
         }
         let viewModel = AddForumViewModel(basicInfoLoader: loader)
         viewModel.urlString = "https://example.com"
@@ -40,6 +41,9 @@ final class AddForumViewModelTests: XCTestCase {
             return XCTFail("Expected a regular failure for a non-linux.do forum")
         }
         XCTAssertFalse(viewModel.isLoading)
-        XCTAssertTrue(viewModel.errorMessage?.hasPrefix("Could not connect:") == true)
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            String(localized: "add_forum.error.connect \(challengeError.localizedDescription)")
+        )
     }
 }

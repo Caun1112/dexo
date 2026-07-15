@@ -140,7 +140,22 @@ final class ChallengeViewController: BaseViewController {
 
     private func syncCookies() {
         Task { @MainActor in
-            await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
+            await syncWebSession()
+        }
+    }
+
+    @MainActor
+    private func syncWebSession() async {
+        await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
+
+        // Cloudflare clearance can be tied to the browser User-Agent. Keep
+        // the API request consistent with the WKWebView that passed the
+        // challenge, including the first add-forum probe before login state
+        // has been persisted.
+        if let evaluatedUserAgent = try? await webView.evaluateJavaScript("navigator.userAgent") as? String,
+           !evaluatedUserAgent.isEmpty
+        {
+            WebCookieStore.shared.userAgent = evaluatedUserAgent
         }
     }
 
@@ -150,7 +165,7 @@ final class ChallengeViewController: BaseViewController {
 
     @objc private func doneTapped() {
         Task { @MainActor in
-            await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
+            await syncWebSession()
             dismiss(animated: true)
         }
     }

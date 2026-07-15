@@ -18,3 +18,6 @@ What to Test
 - Complete the challenge, return to Add Forum, and tap Add Forum again to verify the forum is added successfully.
 - Cancel the challenge or leave it incomplete and confirm the forum is not added.
 - Verify existing linux.do challenge prompts from forum features still open the same challenge page.
+- After passing the linux.do challenge, retry adding the forum and confirm the clearance cookies and browser session are reused without showing the challenge again.
+- Open a post whose thumbnail links to a full-resolution image. Confirm the image browser loads the linked original asset rather than the thumbnail.
+- In the image browser, verify a single tap dismisses it, double-tapping only zooms, pinch zoom does not trigger dismissal, and paging still works.

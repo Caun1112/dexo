@@ -68,6 +68,7 @@ final class ImageBrowserController: LightboxController {
         headerView.closeButton.isHidden = true
 
         pageDelegate = self
+        imageTapDelegate = self
         installCloseButton()
         view.addSubview(saveButton)
         view.addSubview(pageControl)
@@ -357,6 +358,19 @@ extension ImageBrowserController: LightboxControllerPageDelegate {
     }
 }
 
+// MARK: - LightboxControllerTapDelegate
+
+extension ImageBrowserController: LightboxControllerTapDelegate {
+    func lightboxController(_ controller: LightboxController, didTap image: LightboxImage, at index: Int) {
+        dismiss(animated: true)
+    }
+
+    func lightboxController(_ controller: LightboxController, didDoubleTap image: LightboxImage, at index: Int) {
+        // PageView has already toggled its zoom scale. Keeping this callback a
+        // no-op prevents the single-tap close path from consuming a double tap.
+    }
+}
+
 // MARK: - UIGestureRecognizerDelegate
 
 extension ImageBrowserController: UIGestureRecognizerDelegate {
@@ -378,6 +392,11 @@ extension ImageBrowserController: UIGestureRecognizerDelegate {
     /// without this UIKit picks one and the superview gesture loses to the
     /// deeper scrollView gesture, so the snapshot drag never gets a chance.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        true
+        // The custom one-finger dismiss pan must never join the page's two-
+        // finger pinch. Horizontal paging still needs simultaneous recognition.
+        if gestureRecognizer is UIPinchGestureRecognizer || otherGestureRecognizer is UIPinchGestureRecognizer {
+            return false
+        }
+        return true
     }
 }

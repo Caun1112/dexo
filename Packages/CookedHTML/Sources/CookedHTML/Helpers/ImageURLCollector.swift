@@ -52,13 +52,36 @@ public enum ImageURLCollector {
             switch node {
             case .image(let src, _, _, _, let isEmoji):
                 if !isEmoji { urls.append(src) }
-            case .link(_, let children):
-                collectFromInlines(children, into: &urls)
+            case .link(let href, let children):
+                if containsNonEmojiImage(children), isLikelyImageURL(href) {
+                    urls.append(href)
+                } else {
+                    collectFromInlines(children, into: &urls)
+                }
             case .spoiler(let children):
                 collectFromInlines(children, into: &urls)
             default:
                 break
             }
         }
+    }
+
+    private static func containsNonEmojiImage(_ inlines: [InlineNode]) -> Bool {
+        inlines.contains { node in
+            switch node {
+            case .image(_, _, _, _, let isEmoji):
+                return !isEmoji
+            case .link(_, let children), .spoiler(let children):
+                return containsNonEmojiImage(children)
+            default:
+                return false
+            }
+        }
+    }
+
+    private static func isLikelyImageURL(_ rawURL: String) -> Bool {
+        guard let url = URL(string: rawURL) else { return false }
+        let extensions = Set(["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "avif", "svg"])
+        return extensions.contains(url.pathExtension.lowercased())
     }
 }

@@ -23,7 +23,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         LightboxConfig.loadImage = { imageView, url, completion in
-            imageView.sd_setImage(with: url, placeholderImage: nil, options: [], context: ImageCacheManager.shared.contentContext, progress: nil) { image, _, _, _ in
+            // Browser URLs point at the Discourse lightbox href (original
+            // asset), not the inline thumbnail src. Refreshing the cache here
+            // prevents an earlier low-resolution response for an equivalent
+            // key from remaining on screen when the user zooms in.
+            imageView.sd_setImage(
+                with: url,
+                placeholderImage: nil,
+                options: [.retryFailed, .highPriority, .refreshCached],
+                context: ImageCacheManager.shared.contentContext,
+                progress: nil
+            ) { image, _, _, _ in
                 completion?(image)
             }
         }

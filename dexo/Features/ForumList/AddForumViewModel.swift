@@ -51,7 +51,7 @@ final class AddForumViewModel {
             if let basicInfoLoader {
                 info = try await basicInfoLoader(normalized)
             } else {
-                info = try await api.fetchBasicInfo()
+                info = try await api.fetchBasicInfo(includeStoredWebCookies: api.isLinuxDo)
             }
 
             var forum = ForumInstance.new(

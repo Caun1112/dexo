@@ -100,6 +100,52 @@ final class InlineExtractorTests: XCTestCase {
         }
     }
 
+    func testImageURLCollectorUsesFullResolutionInlineLightboxLink() {
+        let blocks: [ContentBlock] = [
+            .paragraph([
+                .link(
+                    href: "https://cdn.example.com/original/photo.jpg",
+                    children: [
+                        .image(
+                            src: "https://cdn.example.com/optimized/photo_690x460.jpg",
+                            alt: "photo",
+                            width: 690,
+                            height: 460,
+                            isEmoji: false
+                        ),
+                    ]
+                ),
+            ]),
+        ]
+
+        XCTAssertEqual(ImageURLCollector.collectImageURLs(from: blocks), [
+            "https://cdn.example.com/original/photo.jpg",
+        ])
+    }
+
+    func testImageURLCollectorKeepsThumbnailForNonImageLink() {
+        let blocks: [ContentBlock] = [
+            .paragraph([
+                .link(
+                    href: "https://example.com/topic/1",
+                    children: [
+                        .image(
+                            src: "https://cdn.example.com/preview.jpg",
+                            alt: "preview",
+                            width: 690,
+                            height: 460,
+                            isEmoji: false
+                        ),
+                    ]
+                ),
+            ]),
+        ]
+
+        XCTAssertEqual(ImageURLCollector.collectImageURLs(from: blocks), [
+            "https://cdn.example.com/preview.jpg",
+        ])
+    }
+
     // MARK: - Line Break
 
     func testLineBreak() {

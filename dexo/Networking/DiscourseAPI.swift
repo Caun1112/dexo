@@ -319,8 +319,27 @@ final class DiscourseAPI {
         try await request(route: .siteInfo)
     }
 
-    func fetchBasicInfo() async throws -> DiscourseBasicInfo {
-        try await request(route: .basicInfo)
+    func fetchBasicInfo(includeStoredWebCookies: Bool = false) async throws -> DiscourseBasicInfo {
+        let route = DiscourseRouter.basicInfo
+        var headers = HTTPHeaders()
+
+        // The add-forum probe runs before a ForumInstance or the web-auth
+        // sentinel exists in Keychain. Explicitly carry the cookies captured
+        // by ChallengeViewController for that first request instead of
+        // relying on the authenticated-request interceptor path.
+        if includeStoredWebCookies,
+           let url = URL(string: baseURL + route.path)
+        {
+            let cookieHeader = WebCookieStore.shared.cookieHeader(for: url)
+            if !cookieHeader.isEmpty {
+                headers.add(name: "Cookie", value: cookieHeader)
+            }
+            if let userAgent = WebCookieStore.shared.userAgent {
+                headers.add(name: "User-Agent", value: userAgent)
+            }
+        }
+
+        return try await request(route: route, headers: headers)
     }
 
     func fetchNotifications(limit: Int? = nil, filter: String? = nil) async throws -> DiscourseNotificationList {
