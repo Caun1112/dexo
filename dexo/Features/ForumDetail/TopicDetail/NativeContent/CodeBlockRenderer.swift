@@ -42,7 +42,7 @@ enum CodeBlockRenderer: BlockRenderer {
             copyButton.heightAnchor.constraint(equalToConstant: 26),
         ])
 
-        // Code view — a single UITextView that internally scrolls in both axes.
+        // Code view — a single UITextView that wraps and scrolls vertically.
         //
         // Why not UILabel-in-UIScrollView? `UILabel.numberOfLines = 0` computes its
         // intrinsicContentSize by running a full TextKit layout over the whole
@@ -53,11 +53,10 @@ enum CodeBlockRenderer: BlockRenderer {
         // window, independent of the code length.
         //
         // Sizing strategy:
-        // - No word wrap (`textContainer.size.width = .greatestFiniteMagnitude`) so
-        //   long lines trigger horizontal scrolling instead of reflowing.
-        // - The view height is capped at `Self.maxVisibleLines × lineHeight`.
-        //   Short blocks (≤ cap lines) size to their natural height; long blocks
-        //   are clamped and the user scrolls vertically inside the box.
+        // - Long logical lines wrap at the available code width, which keeps
+        //   natural-language snippets (especially Chinese) readable.
+        // - The view height is capped at `Self.maxVisibleLines` visual lines.
+        //   Longer blocks scroll vertically inside the box.
         let codeView = UITextView()
         codeView.isEditable = false
         codeView.isSelectable = true          // allow select/copy
@@ -65,12 +64,9 @@ enum CodeBlockRenderer: BlockRenderer {
         codeView.backgroundColor = .clear
         codeView.textContainerInset = .zero
         codeView.textContainer.lineFragmentPadding = 0
-        codeView.textContainer.widthTracksTextView = false
-        codeView.textContainer.size = CGSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
-        )
-        codeView.showsHorizontalScrollIndicator = true
+        codeView.textContainer.widthTracksTextView = true
+        codeView.textContainer.lineBreakMode = .byWordWrapping
+        codeView.showsHorizontalScrollIndicator = false
         codeView.showsVerticalScrollIndicator = true
         codeView.alwaysBounceHorizontal = false
         codeView.alwaysBounceVertical = false
@@ -82,7 +78,11 @@ enum CodeBlockRenderer: BlockRenderer {
         ])
         container.addSubview(codeView)
 
-        let codeHeight = Self.measureCodeHeight(code: code, font: config.codeFont)
+        let codeHeight = Self.measureCodeHeight(
+            code: code,
+            font: config.codeFont,
+            contentWidth: config.contentWidth
+        )
 
         NSLayoutConstraint.activate([
             headerStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
@@ -103,36 +103,27 @@ enum CodeBlockRenderer: BlockRenderer {
     static let maxVisibleLines = 20
 
     /// Measured height of the code view (inner scroll area, no header chrome).
-    /// For blocks ≤ `maxVisibleLines` we measure the real code via TextKit,
-    /// since `font.lineHeight × lines` underestimates the rendered
-    /// line-fragment height for some fonts / scripts and was forcing short
-    /// blocks into vertical scroll. Longer blocks measure a synthetic
-    /// `maxVisibleLines`-line sample so we don't pay full layout of huge pastes
-    /// but still get a height that matches how TextKit will render.
-    static func measureCodeHeight(code: String, font: UIFont) -> CGFloat {
-        var newlineCount = 0
-        for ch in code.unicodeScalars where ch == "\n" { newlineCount += 1 }
-        let lineCount = newlineCount + 1
-
-        let source: String
-        if lineCount <= maxVisibleLines {
-            source = code
-        } else {
-            source = String(repeating: "X\n", count: maxVisibleLines - 1) + "X"
-        }
-
-        let storage = NSTextStorage(string: source, attributes: [.font: font])
+    /// Measures visual lines at the same width used by the rendered text view.
+    /// `maximumNumberOfLines` stops TextKit after the visible cap, avoiding a
+    /// full layout pass for very large pasted code blocks.
+    static func measureCodeHeight(code: String, font: UIFont, contentWidth: CGFloat) -> CGFloat {
+        let storage = NSTextStorage(string: code, attributes: [.font: font])
         let manager = NSLayoutManager()
         let container = NSTextContainer(size: CGSize(
-            width: CGFloat.greatestFiniteMagnitude,
+            width: max(1, contentWidth - Self.horizontalPadding),
             height: CGFloat.greatestFiniteMagnitude
         ))
         container.lineFragmentPadding = 0
+        container.lineBreakMode = .byWordWrapping
+        container.maximumNumberOfLines = maxVisibleLines
         manager.addTextContainer(container)
         storage.addLayoutManager(manager)
         manager.ensureLayout(for: container)
         return ceil(manager.usedRect(for: container).height) + 2
     }
+
+    /// 12pt leading + 12pt trailing inset around the text view.
+    private static let horizontalPadding: CGFloat = 24
 }
 
 // MARK: - Copy Button

@@ -218,6 +218,29 @@ final class TopicRenderCacheTests: XCTestCase {
         XCTAssertEqual(expected, actual, accuracy: 1)
     }
 
+    func testLongChineseCodeWrapsIntoMultipleVisualLines() throws {
+        let code = "请先只读检查 Windows Application 日志中是否持续出现 ChatGPT.exe、Event ID 1000、0xc06d007f，并确认是否指向 Codex Micro 的 serialport.node/HID.node。若不匹配就停止；若匹配，先检查更新并普通重启。仍复现时，再制作可回滚的 A/B 启动器：备份 Local Storage，通过 MSIX AUMID 启动，并仅对本次进程加入 host-resolver-rules。禁止删除任务数据、修改 hosts、WindowsApps、注册表或 .codex。"
+        let textView = try renderCodeView(code: code)
+        let codeFont = NativeRenderConfig.default(contentWidth: 320).codeFont
+
+        XCTAssertTrue(textView.isScrollEnabled)
+        XCTAssertTrue(textView.textContainer.widthTracksTextView)
+        XCTAssertEqual(textView.bounds.width, 296, accuracy: 0.5)
+        XCTAssertGreaterThan(textView.bounds.height, codeFont.lineHeight * 3)
+        XCTAssertLessThanOrEqual(textView.contentSize.width, textView.bounds.width + 0.5)
+    }
+
+    func testWrappedCodeCanScrollVerticallyPastVisibleLineCap() throws {
+        let line = "一段没有手动换行的中文内容也应该按代码块宽度自动折行并保持可以继续向下滚动查看。"
+        let code = String(repeating: line, count: 20)
+        let textView = try renderCodeView(code: code)
+
+        XCTAssertGreaterThan(textView.contentSize.height, textView.bounds.height)
+        let targetOffset = min(80, textView.contentSize.height - textView.bounds.height)
+        textView.setContentOffset(CGPoint(x: 0, y: targetOffset), animated: false)
+        XCTAssertEqual(textView.contentOffset.y, targetOffset, accuracy: 0.5)
+    }
+
     func testPostIDResolverFindsVirtualizedContainer() {
         let provider = TestPostIDProviderView(postId: 77)
         let nested = UIView()
@@ -225,6 +248,31 @@ final class TopicRenderCacheTests: XCTestCase {
 
         XCTAssertEqual(TopicPostIDResolver.postId(startingAt: nested), 77)
         XCTAssertEqual(TopicPostIDResolver.postId(startingAt: UIView()), 0)
+    }
+
+    private func firstTextView(in view: UIView) -> UITextView? {
+        if let textView = view as? UITextView { return textView }
+        for subview in view.subviews {
+            if let textView = firstTextView(in: subview) { return textView }
+        }
+        return nil
+    }
+
+    private func renderCodeView(code: String, width: CGFloat = 320) throws -> UITextView {
+        let config = NativeRenderConfig.default(contentWidth: width, baseURL: nil)
+        let block = ContentBlock.codeBlock(language: nil, code: code)
+        let height = try XCTUnwrap(BlockHeightCalculator.height(for: block, config: config))
+        let view = CodeBlockRenderer.render(block, config: config, delegate: nil)
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: width, height: height))
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+        host.layoutIfNeeded()
+        return try XCTUnwrap(firstTextView(in: view))
     }
 
     func testTreeContinuationIncludesAncestorOwnAndChildColumns() {

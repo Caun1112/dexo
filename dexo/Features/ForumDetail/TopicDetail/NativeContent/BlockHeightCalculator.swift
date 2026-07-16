@@ -309,12 +309,16 @@ enum BlockHeightCalculator {
 
     // MARK: - Code Block
 
-    /// Mirrors `CodeBlockRenderer`. Delegates per-line-count height to the
+    /// Mirrors `CodeBlockRenderer`. Delegates visual-line height to the
     /// renderer's TextKit measurement so the cell height and the actual code
     /// view stay in sync — the old `font.lineHeight * lines` estimate
     /// underestimated for some fonts and caused short blocks to scroll.
     private static func codeBlockHeight(code: String, config: NativeRenderConfig) -> CGFloat {
-        let codeHeight = CodeBlockRenderer.measureCodeHeight(code: code, font: config.codeFont)
+        let codeHeight = CodeBlockRenderer.measureCodeHeight(
+            code: code,
+            font: config.codeFont,
+            contentWidth: config.contentWidth
+        )
         return Self.codeChromeHeight + codeHeight
     }
 
