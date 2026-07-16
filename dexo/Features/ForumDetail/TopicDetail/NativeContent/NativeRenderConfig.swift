@@ -1,6 +1,15 @@
 import CookedHTML
 import UIKit
 
+enum NativeImageSizingMode {
+    /// Match Discourse's 690px post canvas, scaling image dimensions with the
+    /// available post width.
+    case discourseResponsive
+    /// Preserve the image's declared size whenever it fits, while still
+    /// shrinking oversized images to the available width.
+    case fitWithoutUpscaling
+}
+
 struct NativeRenderConfig {
     let baseFont: UIFont
     let baseColor: UIColor
@@ -9,6 +18,27 @@ struct NativeRenderConfig {
     let codeBackgroundColor: UIColor
     let contentWidth: CGFloat
     let baseURL: String?
+    let imageSizingMode: NativeImageSizingMode
+
+    init(
+        baseFont: UIFont,
+        baseColor: UIColor,
+        linkColor: UIColor,
+        codeFont: UIFont,
+        codeBackgroundColor: UIColor,
+        contentWidth: CGFloat,
+        baseURL: String?,
+        imageSizingMode: NativeImageSizingMode = .discourseResponsive
+    ) {
+        self.baseFont = baseFont
+        self.baseColor = baseColor
+        self.linkColor = linkColor
+        self.codeFont = codeFont
+        self.codeBackgroundColor = codeBackgroundColor
+        self.contentWidth = contentWidth
+        self.baseURL = baseURL
+        self.imageSizingMode = imageSizingMode
+    }
 
     var attributedStringConfig: AttributedStringConfig {
         AttributedStringConfig(

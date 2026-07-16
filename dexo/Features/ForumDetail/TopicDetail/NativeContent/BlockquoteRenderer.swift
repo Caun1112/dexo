@@ -36,7 +36,8 @@ enum BlockquoteRenderer: BlockRenderer {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth - 15,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
 
         let views = NativeContentRenderer.renderBlocks(inner, config: quoteConfig, delegate: delegate)
@@ -270,7 +271,8 @@ enum BlockquoteRenderer: BlockRenderer {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth - calloutHorizontalPadding * 2,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
         let contentStack = UIStackView()
         contentStack.axis = .vertical

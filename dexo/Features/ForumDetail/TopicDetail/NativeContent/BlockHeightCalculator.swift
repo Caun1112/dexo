@@ -144,7 +144,12 @@ enum BlockHeightCalculator {
             return headingHeight(level: level, inlines: inlines, config: config)
 
         case .image(_, _, let width, let height, _):
-            return imageHeight(width: width, height: height, containerWidth: config.contentWidth)
+            return imageHeight(
+                width: width,
+                height: height,
+                containerWidth: config.contentWidth,
+                sizingMode: config.imageSizingMode
+            )
 
         case .divider:
             return Self.dividerHeight
@@ -166,7 +171,12 @@ enum BlockHeightCalculator {
             return listHeight(ordered: ordered, items: items, config: config)
 
         case .video(_, _, _, let width, let height, _, _):
-            return imageHeight(width: width, height: height, containerWidth: config.contentWidth)
+            return imageHeight(
+                width: width,
+                height: height,
+                containerWidth: config.contentWidth,
+                sizingMode: .discourseResponsive
+            )
 
         case .spoiler(let blocks):
             return spoilerHeight(blocks: blocks, config: config)
@@ -254,7 +264,8 @@ enum BlockHeightCalculator {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
         let attr = inlines.attributedString(config: headingConfig.attributedStringConfig)
         return attributedTextHeight(attr, width: config.contentWidth)
@@ -279,11 +290,18 @@ enum BlockHeightCalculator {
     private static func imageHeight(
         width: Int?,
         height: Int?,
-        containerWidth: CGFloat
+        containerWidth: CGFloat,
+        sizingMode: NativeImageSizingMode
     ) -> CGFloat {
         if let w = width, let h = height, w > 0, h > 0 {
-            let fraction = min(CGFloat(w) / Self.imageReferenceWidth, 1)
-            let displayWidth = containerWidth * fraction
+            let displayWidth: CGFloat
+            switch sizingMode {
+            case .discourseResponsive:
+                let fraction = min(CGFloat(w) / Self.imageReferenceWidth, 1)
+                displayWidth = containerWidth * fraction
+            case .fitWithoutUpscaling:
+                displayWidth = min(CGFloat(w), containerWidth)
+            }
             return CGFloat(h) * (displayWidth / CGFloat(w))
         }
         return containerWidth * 9.0 / 16.0
@@ -320,7 +338,8 @@ enum BlockHeightCalculator {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth - 15,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
         guard let innerH = nestedStackHeight(for: inner, config: innerConfig, spacing: 6) else { return nil }
         return innerH + Self.blockquoteVerticalPadding
@@ -334,7 +353,8 @@ enum BlockHeightCalculator {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth - BlockquoteRenderer.calloutHorizontalPadding * 2,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
         guard let innerH = nestedStackHeight(
             for: parsed.blocks,
@@ -367,7 +387,8 @@ enum BlockHeightCalculator {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth - 36,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
         guard let innerH = nestedStackHeight(for: content, config: innerConfig, spacing: 6) else { return nil }
 
@@ -446,7 +467,8 @@ enum BlockHeightCalculator {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth - indent,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
 
         var itemHeights: [CGFloat] = []

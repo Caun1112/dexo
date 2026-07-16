@@ -45,7 +45,8 @@ final class DetailsCardView: UIView {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth - 24,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
 
         // MARK: Header

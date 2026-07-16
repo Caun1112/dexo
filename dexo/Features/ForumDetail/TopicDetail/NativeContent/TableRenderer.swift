@@ -56,7 +56,7 @@ enum TableRenderer: BlockRenderer {
     private struct CellMeasurement {
         let prebuiltAttr: NSAttributedString?
         let needsTextView: Bool
-        let scaledBlocks: [ContentBlock]
+        let blocks: [ContentBlock]
     }
 
     private struct Layout {
@@ -110,7 +110,6 @@ enum TableRenderer: BlockRenderer {
             var rowMeas: [CellMeasurement] = []
             for col in 0..<columnCount {
                 let cellBlocks = col < row.count ? row[col] : []
-                let scaledBlocks = scaleImagesForCell(cellBlocks)
                 var prebuiltAttr: NSAttributedString?
                 var needsTextView = false
                 let naturalWidth: CGFloat
@@ -124,12 +123,12 @@ enum TableRenderer: BlockRenderer {
                         context: nil
                     ).width)
                 } else {
-                    naturalWidth = estimateNaturalWidth(of: scaledBlocks, config: config)
+                    naturalWidth = estimateNaturalWidth(of: cellBlocks, config: config)
                 }
                 rowMeas.append(CellMeasurement(
                     prebuiltAttr: prebuiltAttr,
                     needsTextView: needsTextView,
-                    scaledBlocks: scaledBlocks
+                    blocks: cellBlocks
                 ))
                 let clamped = max(min(naturalWidth, maxColumnContentWidth), minColumnContentWidth)
                 columnContentWidths[col] = max(columnContentWidths[col], clamped)
@@ -192,7 +191,8 @@ enum TableRenderer: BlockRenderer {
                 codeFont: config.codeFont,
                 codeBackgroundColor: config.codeBackgroundColor,
                 contentWidth: innerWidth,
-                baseURL: config.baseURL
+                baseURL: config.baseURL,
+                imageSizingMode: .fitWithoutUpscaling
             )
 
             let stack = UIStackView()
@@ -200,7 +200,7 @@ enum TableRenderer: BlockRenderer {
             stack.spacing = cellStackSpacing
             stack.translatesAutoresizingMaskIntoConstraints = false
 
-            let views = NativeContentRenderer.renderBlocks(meas.scaledBlocks, config: cellConfig, delegate: delegate)
+            let views = NativeContentRenderer.renderBlocks(meas.blocks, config: cellConfig, delegate: delegate)
             for view in views {
                 stack.addArrangedSubview(view)
             }
@@ -327,31 +327,6 @@ enum TableRenderer: BlockRenderer {
         ])
 
         return (scrollView, firstRow)
-    }
-
-    // MARK: - Image Scaling
-
-    /// Rescale image dimensions to 690px reference width so TappableImageContainer
-    /// renders them at full cell width. Recurses into spoiler/blockquote containers.
-    private static func scaleImagesForCell(_ blocks: [ContentBlock]) -> [ContentBlock] {
-        blocks.map { block in
-            switch block {
-            case .image(let src, let alt, let w, let h, let href):
-                if let w, let h, w > 0 {
-                    let scaled = Int(690.0 * CGFloat(h) / CGFloat(w))
-                    return .image(src: src, alt: alt, width: 690, height: scaled, href: href)
-                }
-                return block
-            case .spoiler(let inner):
-                return .spoiler(blocks: scaleImagesForCell(inner))
-            case .blockquote(let inner):
-                return .blockquote(blocks: scaleImagesForCell(inner))
-            case .details(let summary, let inner):
-                return .details(summary: summary, content: scaleImagesForCell(inner))
-            default:
-                return block
-            }
-        }
     }
 
     // MARK: - Width Estimation
@@ -497,4 +472,3 @@ private extension UIFont {
         return UIFont(descriptor: descriptor, size: 0)
     }
 }
-

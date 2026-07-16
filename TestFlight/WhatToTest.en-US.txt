@@ -20,4 +20,5 @@ What to Test
 - Verify existing linux.do challenge prompts from forum features still open the same challenge page.
 - After passing the linux.do challenge, retry adding the forum and confirm the clearance cookies and browser session are reused without showing the challenge again.
 - Open a post whose thumbnail links to a full-resolution image. Confirm the image browser loads the linked original asset rather than the thumbnail.
+- Open a topic containing a table with small thumbnail images. Confirm thumbnails keep their declared size instead of stretching to the column width and remain sharp; images wider than the cell should shrink proportionally and still open in the image browser.
 - In the image browser, verify a single tap dismisses it, double-tapping only zooms, pinch zoom does not trigger dismissal, and paging still works.

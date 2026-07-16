@@ -127,7 +127,8 @@ enum ListRenderer: BlockRenderer {
                     codeFont: config.codeFont,
                     codeBackgroundColor: config.codeBackgroundColor,
                     contentWidth: config.contentWidth - indent,
-                    baseURL: config.baseURL
+                    baseURL: config.baseURL,
+                    imageSizingMode: config.imageSizingMode
                 )
                 let childViews = NativeContentRenderer.renderBlocks([block], config: childConfig, delegate: delegate)
                 for childView in childViews {

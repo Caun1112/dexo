@@ -49,10 +49,17 @@ final class TappableImageContainer: UIView {
         url.pathExtension.lowercased() == "gif"
     }
 
-    init(url: URL, width: Int?, height: Int?, containerWidth: CGFloat, href: URL? = nil) {
+    init(
+        url: URL,
+        width: Int?,
+        height: Int?,
+        containerWidth: CGFloat,
+        href: URL? = nil,
+        sizingMode: NativeImageSizingMode = .discourseResponsive
+    ) {
         sourceURL = url
         self.containerWidth = containerWidth
-        hasOriginalSize = width != nil && height != nil
+        hasOriginalSize = width.map { $0 > 0 } == true && height.map { $0 > 0 } == true
         imageURL = href ?? url
         let iv: UIImageView = Self.isLikelyAnimated(url) ? SDAnimatedImageView() : UIImageView()
         iv.contentMode = .scaleAspectFill
@@ -64,37 +71,26 @@ final class TappableImageContainer: UIView {
 
         addSubview(imageView)
 
-        let displayWidth: CGFloat
-        let displayHeight: CGFloat
-        if let w = width, let h = height, w > 0, h > 0 {
-            let fraction = min(CGFloat(w) / Self.referenceWidth, 1)
-            displayWidth = containerWidth * fraction
-            displayHeight = CGFloat(h) * (displayWidth / CGFloat(w))
-        } else {
-            displayWidth = containerWidth
-            displayHeight = containerWidth * 9.0 / 16.0
-        }
+        let displaySize = Self.displaySize(
+            width: width,
+            height: height,
+            containerWidth: containerWidth,
+            sizingMode: sizingMode
+        )
+        let isFullWidth = displaySize.width >= containerWidth
 
-        let isFullWidth = displayWidth >= containerWidth
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
 
-        if isFullWidth {
-            NSLayoutConstraint.activate([
-                imageView.topAnchor.constraint(equalTo: topAnchor),
-                imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-                imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-                imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            ])
-        } else {
-            NSLayoutConstraint.activate([
-                imageView.topAnchor.constraint(equalTo: topAnchor),
-                imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-                imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            ])
-        }
-
-        imageWidthConstraint = imageView.widthAnchor.constraint(equalToConstant: displayWidth)
+        imageWidthConstraint = imageView.widthAnchor.constraint(equalToConstant: displaySize.width)
         imageWidthConstraint.isActive = !isFullWidth
-        imageHeightConstraint = imageView.heightAnchor.constraint(equalToConstant: displayHeight)
+        if isFullWidth {
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+        }
+        imageHeightConstraint = imageView.heightAnchor.constraint(equalToConstant: displaySize.height)
         imageHeightConstraint.isActive = true
 
         backgroundColor = .clear
@@ -121,6 +117,30 @@ final class TappableImageContainer: UIView {
                 self.scheduleCoalescedHeightUpdate()
             }
         }
+    }
+
+    static func displaySize(
+        width: Int?,
+        height: Int?,
+        containerWidth: CGFloat,
+        sizingMode: NativeImageSizingMode
+    ) -> CGSize {
+        guard let width, let height, width > 0, height > 0 else {
+            return CGSize(width: containerWidth, height: containerWidth * 9.0 / 16.0)
+        }
+
+        let displayWidth: CGFloat
+        switch sizingMode {
+        case .discourseResponsive:
+            let fraction = min(CGFloat(width) / Self.referenceWidth, 1)
+            displayWidth = containerWidth * fraction
+        case .fitWithoutUpscaling:
+            displayWidth = min(CGFloat(width), containerWidth)
+        }
+        return CGSize(
+            width: displayWidth,
+            height: CGFloat(height) * displayWidth / CGFloat(width)
+        )
     }
 
     @available(*, unavailable)
@@ -234,7 +254,8 @@ enum ImageRenderer: BlockRenderer {
             width: width,
             height: height,
             containerWidth: config.contentWidth,
-            href: hrefURL
+            href: hrefURL,
+            sizingMode: config.imageSizingMode
         )
         container.delegate = delegate
         return container

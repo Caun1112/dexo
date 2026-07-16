@@ -28,7 +28,8 @@ enum HeadingRenderer: BlockRenderer {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
             contentWidth: config.contentWidth,
-            baseURL: config.baseURL
+            baseURL: config.baseURL,
+            imageSizingMode: config.imageSizingMode
         )
 
         let attr = inlines.attributedString(config: headingConfig.attributedStringConfig)
