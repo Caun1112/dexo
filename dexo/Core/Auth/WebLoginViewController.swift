@@ -223,6 +223,18 @@ final class WebLoginViewController: BaseViewController {
             self.onCookiesReady = onCookiesReady
         }
 
+        func webView(
+            _ webView: WKWebView,
+            didReceive challenge: URLAuthenticationChallenge,
+            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        ) {
+            if let credential = WebViewDoHConfigurator.credentialForLocalProxyChallenge(challenge) {
+                completionHandler(.useCredential, credential)
+            } else {
+                completionHandler(.performDefaultHandling, nil)
+            }
+        }
+
         /// Collect cookies and fire the callback. Only invoked from the "Done" button tap —
         /// auto-dismiss on navigation finish / cookie change was intentionally removed so
         /// the user decides when to hand off to the app.

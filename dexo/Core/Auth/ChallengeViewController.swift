@@ -234,6 +234,18 @@ final class ChallengeViewController: BaseViewController {
             self.onNavigationFinished = onNavigationFinished
         }
 
+        func webView(
+            _ webView: WKWebView,
+            didReceive challenge: URLAuthenticationChallenge,
+            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        ) {
+            if let credential = WebViewDoHConfigurator.credentialForLocalProxyChallenge(challenge) {
+                completionHandler(.useCredential, credential)
+            } else {
+                completionHandler(.performDefaultHandling, nil)
+            }
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             onNavigationFinished()
         }

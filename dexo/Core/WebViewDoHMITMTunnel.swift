@@ -1,0 +1,365 @@
+import Foundation
+import Network
+
+@available(iOS 17.0, *)
+private nonisolated final class WebViewMITMRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+}
+
+/// Receives HTTP/1.1 after the CONNECT framer has terminated local TLS and
+/// forwards each request with URLSession. The request URL, headers, response
+/// body, and WebKit origin are not rewritten.
+@available(iOS 17.0, *)
+nonisolated final class WebViewDoHMITMTunnel: @unchecked Sendable {
+    private static let receiveBufferSize = 64 * 1024
+    private static let hopByHopHeaders: Set<String> = [
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    ]
+
+    private let id: UUID
+    private let client: NWConnection
+    private let queue: DispatchQueue
+    private let onStop: @Sendable () -> Void
+    private let redirectDelegate = WebViewMITMRedirectDelegate()
+    private let session: URLSession
+
+    private var parser = HTTPProxyRequestParser()
+    private var activeTask: URLSessionDataTask?
+    private var isStopped = false
+    private var isForwarding = false
+    private var receivedBytes = 0
+    private var sentBytes = 0
+
+    init(
+        id: UUID,
+        client: NWConnection,
+        queue: DispatchQueue,
+        onStop: @escaping @Sendable () -> Void
+    ) {
+        self.id = id
+        self.client = client
+        self.queue = queue
+        self.onStop = onStop
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 120
+        session = URLSession(
+            configuration: configuration,
+            delegate: redirectDelegate,
+            delegateQueue: nil
+        )
+    }
+
+    func start() {
+        client.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .ready:
+                self.log("native TLS ready; waiting for decrypted HTTP")
+                self.receiveRequestBytes()
+            case .waiting(let error):
+                self.log("local connection waiting: \(error)")
+            case .failed(let error):
+                self.log("local connection failed: \(error)")
+                self.stop()
+            case .cancelled:
+                self.stop()
+            default:
+                break
+            }
+        }
+        client.start(queue: queue)
+    }
+
+    func cancel() {
+        queue.async { [weak self] in self?.stop() }
+    }
+
+    private func receiveRequestBytes() {
+        guard !isStopped, !isForwarding else { return }
+        do {
+            if let request = try parser.nextRequest() {
+                forward(request)
+                return
+            }
+        } catch {
+            handleParserError(error)
+            return
+        }
+
+        client.receive(minimumIncompleteLength: 1, maximumLength: Self.receiveBufferSize) { [weak self] data, _, complete, error in
+            guard let self, !self.isStopped else { return }
+            guard error == nil else {
+                self.log("HTTP receive failed: \(String(describing: error))")
+                self.stop()
+                return
+            }
+            if let data, !data.isEmpty {
+                self.receivedBytes += data.count
+                do {
+                    try self.parser.append(data)
+                } catch {
+                    self.handleParserError(error)
+                    return
+                }
+            }
+            if complete {
+                self.stop()
+            } else {
+                self.receiveRequestBytes()
+            }
+        }
+    }
+
+    private func forward(_ request: HTTPProxyRequestParser.Request) {
+        guard !isStopped else { return }
+        guard request.values(forHeader: "Upgrade").allSatisfy({ $0.isEmpty }) else {
+            sendErrorResponse(statusCode: 501, reason: "Not Implemented")
+            return
+        }
+
+        let forwarded: URLRequest
+        do {
+            forwarded = try makeURLRequest(from: request)
+        } catch {
+            log("request rejected: \(error)")
+            sendErrorResponse(statusCode: 400, reason: "Bad Request")
+            return
+        }
+
+        isForwarding = true
+        let closeAfterResponse = request.values(forHeader: "Connection")
+            .flatMap { $0.split(separator: ",") }
+            .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "close" }
+
+        log("\(request.method) \(forwarded.url?.absoluteString ?? request.target)")
+        let task = session.dataTask(with: forwarded) { [weak self] data, response, error in
+            guard let self else { return }
+            self.queue.async {
+                guard !self.isStopped else { return }
+                self.activeTask = nil
+                guard error == nil, let response = response as? HTTPURLResponse else {
+                    self.log("URLSession failed: \(String(describing: error))")
+                    self.sendErrorResponse(statusCode: 502, reason: "Bad Gateway")
+                    return
+                }
+                self.send(
+                    response: response,
+                    body: data ?? Data(),
+                    closeAfterResponse: closeAfterResponse
+                )
+            }
+        }
+        activeTask = task
+        task.resume()
+    }
+
+    private func makeURLRequest(from request: HTTPProxyRequestParser.Request) throws -> URLRequest {
+        enum RequestError: Error { case invalidAuthority, invalidTarget }
+
+        let hosts = request.values(forHeader: "Host")
+        guard hosts.count == 1 else { throw RequestError.invalidAuthority }
+        let authority = hosts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !authority.isEmpty,
+              !authority.contains("/"),
+              !authority.contains("@"),
+              let origin = URL(string: "https://\(authority)"),
+              let originHost = origin.host,
+              !originHost.isEmpty
+        else {
+            throw RequestError.invalidAuthority
+        }
+
+        let pathAndQuery: String
+        if request.target.hasPrefix("/") {
+            pathAndQuery = request.target
+        } else if request.target == "*" {
+            pathAndQuery = "/"
+        } else if let absolute = URL(string: request.target),
+                  absolute.scheme?.lowercased() == "https",
+                  absolute.host?.lowercased() == originHost.lowercased()
+        {
+            var components = URLComponents(url: absolute, resolvingAgainstBaseURL: false)
+            components?.scheme = nil
+            components?.host = nil
+            components?.port = nil
+            components?.user = nil
+            components?.password = nil
+            pathAndQuery = components?.string ?? "/"
+        } else {
+            throw RequestError.invalidTarget
+        }
+
+        guard let url = URL(string: pathAndQuery, relativeTo: origin)?.absoluteURL,
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == originHost.lowercased()
+        else {
+            throw RequestError.invalidTarget
+        }
+
+        var forwarded = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 60
+        )
+        forwarded.httpMethod = request.method
+        forwarded.httpBody = request.body.isEmpty ? nil : request.body
+        forwarded.httpShouldHandleCookies = false
+
+        let connectionNamedHeaders = Set(
+            request.values(forHeader: "Connection")
+                .flatMap { $0.split(separator: ",") }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        )
+        for header in request.headers {
+            let lowercaseName = header.name.lowercased()
+            guard lowercaseName != "host",
+                  lowercaseName != "content-length",
+                  lowercaseName != "accept-encoding",
+                  !Self.hopByHopHeaders.contains(lowercaseName),
+                  !connectionNamedHeaders.contains(lowercaseName)
+            else {
+                continue
+            }
+            forwarded.addValue(header.value, forHTTPHeaderField: header.name)
+        }
+        forwarded.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        return forwarded
+    }
+
+    private func send(response: HTTPURLResponse, body: Data, closeAfterResponse: Bool) {
+        guard !isStopped else { return }
+        var data = Data("HTTP/1.1 \(response.statusCode) \(Self.reasonPhrase(response.statusCode))\r\n".utf8)
+        for (rawName, rawValue) in response.allHeaderFields {
+            let name = String(describing: rawName)
+            let lowercaseName = name.lowercased()
+            guard !Self.hopByHopHeaders.contains(lowercaseName),
+                  lowercaseName != "alt-svc",
+                  lowercaseName != "content-length",
+                  lowercaseName != "content-encoding"
+            else {
+                continue
+            }
+
+            let values = (rawValue as? [String]) ?? [String(describing: rawValue)]
+            for value in values {
+                guard !name.contains("\r"), !name.contains("\n"),
+                      !value.contains("\r"), !value.contains("\n")
+                else { continue }
+                data.append(Data("\(name): \(value)\r\n".utf8))
+            }
+        }
+        data.append(Data("Content-Length: \(body.count)\r\n".utf8))
+        data.append(Data("Connection: \(closeAfterResponse ? "close" : "keep-alive")\r\n\r\n".utf8))
+        data.append(body)
+
+        sentBytes += data.count
+        client.send(content: data, completion: .contentProcessed { [weak self] error in
+            guard let self, !self.isStopped else { return }
+            guard error == nil else {
+                self.log("HTTP response send failed: \(String(describing: error))")
+                self.stop()
+                return
+            }
+            self.log("response \(response.statusCode), body=\(body.count) bytes")
+            self.isForwarding = false
+            closeAfterResponse ? self.stop() : self.receiveRequestBytes()
+        })
+    }
+
+    private func handleParserError(_ error: Error) {
+        log("HTTP parse failed: \(error)")
+        switch error {
+        case HTTPProxyRequestParser.ParseError.headerTooLarge,
+             HTTPProxyRequestParser.ParseError.bodyTooLarge:
+            sendErrorResponse(statusCode: 413, reason: "Content Too Large")
+        case HTTPProxyRequestParser.ParseError.unsupportedTransferEncoding:
+            sendErrorResponse(statusCode: 501, reason: "Not Implemented")
+        default:
+            sendErrorResponse(statusCode: 400, reason: "Bad Request")
+        }
+    }
+
+    private func sendErrorResponse(statusCode: Int, reason: String) {
+        guard !isStopped else { return }
+        isForwarding = true
+        let body = Data("\(statusCode) \(reason)\n".utf8)
+        var response = Data("HTTP/1.1 \(statusCode) \(reason)\r\n".utf8)
+        response.append(Data("Content-Type: text/plain; charset=utf-8\r\n".utf8))
+        response.append(Data("Content-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8))
+        response.append(body)
+        client.send(content: response, completion: .contentProcessed { [weak self] _ in self?.stop() })
+    }
+
+    private func stop() {
+        guard !isStopped else { return }
+        isStopped = true
+        activeTask?.cancel()
+        activeTask = nil
+        session.invalidateAndCancel()
+        client.stateUpdateHandler = nil
+        client.cancel()
+        log("stopping; decrypted received=\(receivedBytes), sent=\(sentBytes)")
+        onStop()
+    }
+
+    private func log(_ message: String) {
+        #if DEBUG
+        print("[WebViewDoHProxy \(id.uuidString.prefix(8))] \(message)")
+        #endif
+    }
+
+    private static func reasonPhrase(_ statusCode: Int) -> String {
+        switch statusCode {
+        case 100: "Continue"
+        case 200: "OK"
+        case 201: "Created"
+        case 202: "Accepted"
+        case 204: "No Content"
+        case 206: "Partial Content"
+        case 301: "Moved Permanently"
+        case 302: "Found"
+        case 303: "See Other"
+        case 304: "Not Modified"
+        case 307: "Temporary Redirect"
+        case 308: "Permanent Redirect"
+        case 400: "Bad Request"
+        case 401: "Unauthorized"
+        case 403: "Forbidden"
+        case 404: "Not Found"
+        case 405: "Method Not Allowed"
+        case 408: "Request Timeout"
+        case 409: "Conflict"
+        case 410: "Gone"
+        case 413: "Content Too Large"
+        case 415: "Unsupported Media Type"
+        case 422: "Unprocessable Content"
+        case 429: "Too Many Requests"
+        case 500: "Internal Server Error"
+        case 502: "Bad Gateway"
+        case 503: "Service Unavailable"
+        case 504: "Gateway Timeout"
+        default: "HTTP Response"
+        }
+    }
+}
