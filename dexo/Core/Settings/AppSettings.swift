@@ -206,31 +206,18 @@ final class AppSettings {
 
     // MARK: - DNS over HTTPS
 
-    enum DoHProvider: Int, CaseIterable {
-        case cloudflare = 0
-        case google = 1
-        case quad9 = 2
-        case alidns = 3
-        case custom = 4
+    static let defaultDoHServerURL = "https://edge.47258.xyz/linuxdo"
+    private static let builtInDoHServerID = UUID(uuidString: "47258000-0000-4000-8000-000000000001")!
 
-        var title: String {
-            switch self {
-            case .cloudflare: return "Cloudflare (1.1.1.1)"
-            case .google: return "Google (8.8.8.8)"
-            case .quad9: return "Quad9 (9.9.9.9)"
-            case .alidns: return "AliDNS (223.5.5.5)"
-            case .custom: return String(localized: "doh.provider.custom")
-            }
-        }
+    struct DoHServer: Codable, Equatable, Identifiable, Sendable {
+        let id: UUID
+        var name: String
+        var urlString: String
 
-        var url: String {
-            switch self {
-            case .cloudflare: return "https://1.1.1.1/dns-query"
-            case .google: return "https://8.8.8.8/resolve"
-            case .quad9: return "https://9.9.9.9:5053/dns-query"
-            case .alidns: return "https://dns.alidns.com/resolve"
-            case .custom: return ""
-            }
+        init(id: UUID = UUID(), name: String, urlString: String) {
+            self.id = id
+            self.name = name
+            self.urlString = urlString
         }
     }
 
@@ -239,20 +226,115 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "dohEnabled") }
     }
 
-    var dohProvider: DoHProvider {
-        get { DoHProvider(rawValue: defaults.integer(forKey: "dohProvider")) ?? .cloudflare }
-        set { defaults.set(newValue.rawValue, forKey: "dohProvider") }
-    }
+    /// All configured resolvers. The first read migrates the former single
+    /// `dohServerURL` value without changing the user's selected endpoint.
+    var dohServers: [DoHServer] {
+        get {
+            if let data = defaults.data(forKey: "dohServers"),
+               let servers = try? JSONDecoder().decode([DoHServer].self, from: data)
+            {
+                return servers
+            }
 
-    var dohCustomURL: String {
-        get { defaults.string(forKey: "dohCustomURL") ?? "" }
-        set { defaults.set(newValue, forKey: "dohCustomURL") }
-    }
-
-    var dohServerURL: String {
-        if dohProvider == .custom {
-            return dohCustomURL
+            let legacyURL = defaults.string(forKey: "dohServerURL") ?? Self.defaultDoHServerURL
+            let server = DoHServer(
+                id: Self.builtInDoHServerID,
+                name: URL(string: legacyURL)?.host ?? "DoH",
+                urlString: legacyURL
+            )
+            persistDoHServers([server])
+            defaults.set(server.id.uuidString, forKey: "defaultDoHServerID")
+            return [server]
         }
-        return dohProvider.url
+        set {
+            persistDoHServers(newValue)
+            if let currentID = storedDefaultDoHServerID,
+               newValue.contains(where: { $0.id == currentID })
+            {
+                return
+            }
+            if let first = newValue.first {
+                defaults.set(first.id.uuidString, forKey: "defaultDoHServerID")
+            } else {
+                defaults.removeObject(forKey: "defaultDoHServerID")
+            }
+        }
+    }
+
+    var defaultDoHServerID: UUID? {
+        get {
+            let servers = dohServers
+            if let stored = storedDefaultDoHServerID,
+               servers.contains(where: { $0.id == stored })
+            {
+                return stored
+            }
+            return servers.first?.id
+        }
+        set {
+            guard let newValue else {
+                defaults.removeObject(forKey: "defaultDoHServerID")
+                return
+            }
+            guard dohServers.contains(where: { $0.id == newValue }) else { return }
+            defaults.set(newValue.uuidString, forKey: "defaultDoHServerID")
+        }
+    }
+
+    var defaultDoHServer: DoHServer? {
+        let servers = dohServers
+        guard let id = defaultDoHServerID else { return servers.first }
+        return servers.first { $0.id == id } ?? servers.first
+    }
+
+    /// Compatibility accessor used by the networking layer.
+    var dohServerURL: String {
+        get { defaultDoHServer?.urlString ?? Self.defaultDoHServerURL }
+        set {
+            var servers = dohServers
+            var newlySelectedID: UUID?
+            if let id = defaultDoHServerID,
+               let index = servers.firstIndex(where: { $0.id == id })
+            {
+                servers[index].urlString = newValue
+            } else {
+                let server = DoHServer(
+                    name: URL(string: newValue)?.host ?? "DoH",
+                    urlString: newValue
+                )
+                servers.append(server)
+                newlySelectedID = server.id
+            }
+            dohServers = servers
+            if let newlySelectedID {
+                defaultDoHServerID = newlySelectedID
+            }
+            defaults.set(newValue, forKey: "dohServerURL")
+        }
+    }
+
+    func saveDoHServer(_ server: DoHServer) {
+        var servers = dohServers
+        if let index = servers.firstIndex(where: { $0.id == server.id }) {
+            servers[index] = server
+        } else {
+            servers.append(server)
+        }
+        dohServers = servers
+    }
+
+    func deleteDoHServer(id: UUID) {
+        var servers = dohServers
+        servers.removeAll { $0.id == id }
+        dohServers = servers
+    }
+
+    private var storedDefaultDoHServerID: UUID? {
+        defaults.string(forKey: "defaultDoHServerID").flatMap(UUID.init(uuidString:))
+    }
+
+    private func persistDoHServers(_ servers: [DoHServer]) {
+        guard let data = try? JSONEncoder().encode(servers) else { return }
+        defaults.set(data, forKey: "dohServers")
     }
 }

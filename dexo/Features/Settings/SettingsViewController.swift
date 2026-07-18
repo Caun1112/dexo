@@ -49,9 +49,9 @@ final class SettingsViewController: ObservableViewController {
     /// Sections actually shown in the table, in order.
     private var visibleSections: [Section] {
         #if DEBUG
-        return [.general, .appearance, .storage, .about, .debug]
+        return [.general, .appearance, .network, .storage, .about, .debug]
         #else
-        return [.general, .appearance, .storage, .about]
+        return [.general, .appearance, .network, .storage, .about]
         #endif
     }
 
@@ -63,21 +63,19 @@ final class SettingsViewController: ObservableViewController {
     }
 
     private func networkRows() -> [NetworkRow] {
-        var rows: [NetworkRow] = [.dohToggle]
-        if settings.dohEnabled {
-            rows.append(.dohProvider)
-            if settings.dohProvider == .custom {
-                rows.append(.dohCustomURL)
-            }
-        }
-        return rows
+        [.dohSettings]
     }
 
     private enum NetworkRow {
-        case dohToggle
-        case dohProvider
-        case dohCustomURL
+        case dohSettings
     }
+
+    #if DEBUG
+    private enum DebugRow: Int, CaseIterable {
+        case renderPreview
+        case webViewProxyTest
+    }
+    #endif
 }
 
 // MARK: - UITableViewDataSource
@@ -95,7 +93,7 @@ extension SettingsViewController: UITableViewDataSource {
         case .about: return 1
         case .network: return networkRows().count
         #if DEBUG
-        case .debug: return 1
+        case .debug: return DebugRow.allCases.count
         #endif
         }
     }
@@ -108,9 +106,14 @@ extension SettingsViewController: UITableViewDataSource {
         case .about: return String(localized: "settings.section.about")
         case .network: return String(localized: "settings.section.network")
         #if DEBUG
-        case .debug: return "Debug"
+        case .debug: return String(localized: "settings.section.debug")
         #endif
         }
+    }
+
+    func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        guard visibleSections[section] == .network else { return nil }
+        return String(localized: "settings.doh.root.footer")
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -141,16 +144,17 @@ extension SettingsViewController: UITableViewDataSource {
         case .network:
             let row = networkRows()[indexPath.row]
             switch row {
-            case .dohToggle:
-                return makeDohToggleCell(tableView, indexPath: indexPath)
-            case .dohProvider:
-                return makeDohProviderCell(tableView, indexPath: indexPath)
-            case .dohCustomURL:
-                return makeDohCustomURLCell(tableView, indexPath: indexPath)
-            }
+            case .dohSettings:
+                return makeDoHSettingsCell(tableView, indexPath: indexPath)
+        }
         #if DEBUG
         case .debug:
-            return makeRenderPreviewCell(tableView, indexPath: indexPath)
+            switch DebugRow(rawValue: indexPath.row)! {
+            case .renderPreview:
+                return makeRenderPreviewCell(tableView, indexPath: indexPath)
+            case .webViewProxyTest:
+                return makeWebViewProxyTestCell(tableView, indexPath: indexPath)
+            }
         #endif
         }
     }
@@ -234,33 +238,26 @@ extension SettingsViewController: UITableViewDataSource {
         return cell
     }
 
-    private func makeDohToggleCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+    private func makeDoHSettingsCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
         applyFonts(to: cell)
-        cell.textLabel?.text = "DNS over HTTPS"
-        cell.selectionStyle = .none
-        let toggle = UISwitch()
-        toggle.isOn = settings.dohEnabled
-        toggle.addTarget(self, action: #selector(dohToggleChanged(_:)), for: .valueChanged)
-        cell.accessoryView = toggle
-        return cell
-    }
-
-    private func makeDohProviderCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
-        applyFonts(to: cell)
-        cell.textLabel?.text = "Provider"
-        cell.detailTextLabel?.text = settings.dohProvider.title
-        cell.accessoryType = .disclosureIndicator
-        return cell
-    }
-
-    private func makeDohCustomURLCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
-        applyFonts(to: cell)
-        cell.textLabel?.text = "Custom URL"
-        cell.detailTextLabel?.text = settings.dohCustomURL.isEmpty ? "Not Set" : settings.dohCustomURL
-        cell.detailTextLabel?.textColor = settings.dohCustomURL.isEmpty ? .placeholderText : .secondaryLabel
+        cell.textLabel?.text = String(localized: "settings.doh.enabled")
+        cell.detailTextLabel?.font = FontManager.shared.font(size: 13)
+        cell.detailTextLabel?.textColor = .secondaryLabel
+        if settings.dohEnabled, let server = settings.defaultDoHServer {
+            cell.detailTextLabel?.text = String(
+                format: String(localized: "settings.doh.root.enabled_format"),
+                server.name
+            )
+        } else {
+            cell.detailTextLabel?.text = String(localized: "settings.doh.status.disabled")
+        }
+        let icon = UIImageView(image: UIImage(systemName: settings.dohEnabled ? "shield.lefthalf.filled" : "shield"))
+        icon.tintColor = settings.dohEnabled ? themeManager.accentColor : .secondaryLabel
+        icon.contentMode = .scaleAspectFit
+        icon.frame = CGRect(x: 0, y: 0, width: 28, height: 28)
+        cell.imageView?.image = icon.image
+        cell.imageView?.tintColor = icon.tintColor
         cell.accessoryType = .disclosureIndicator
         return cell
     }
@@ -286,7 +283,15 @@ extension SettingsViewController: UITableViewDataSource {
     private func makeRenderPreviewCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
         applyFonts(to: cell)
-        cell.textLabel?.text = "Render Preview"
+        cell.textLabel?.text = String(localized: "settings.debug.render_preview")
+        cell.accessoryType = .disclosureIndicator
+        return cell
+    }
+
+    private func makeWebViewProxyTestCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        applyFonts(to: cell)
+        cell.textLabel?.text = String(localized: "settings.debug.webview_proxy_test")
         cell.accessoryType = .disclosureIndicator
         return cell
     }
@@ -332,18 +337,17 @@ extension SettingsViewController: UITableViewDelegate {
                 UIApplication.shared.open(url)
             }
         case .network:
-            let row = networkRows()[indexPath.row]
-            switch row {
-            case .dohProvider:
-                showDohProviderPicker(from: sourceView)
-            case .dohCustomURL:
-                showCustomURLInput()
-            default:
-                break
-            }
+            let viewController = DoHSettingsViewController()
+            navigationController?.pushViewController(viewController, animated: true)
         #if DEBUG
         case .debug:
-            showRenderPreviewInput()
+            switch DebugRow(rawValue: indexPath.row)! {
+            case .renderPreview:
+                showRenderPreviewInput()
+            case .webViewProxyTest:
+                let viewController = WebViewProxyTestViewController()
+                navigationController?.pushViewController(viewController, animated: true)
+            }
         #endif
         }
     }
@@ -354,23 +358,6 @@ extension SettingsViewController: UITableViewDelegate {
 extension SettingsViewController {
     @objc private func autoOpenToggleChanged(_ sender: UISwitch) {
         settings.autoOpenLastForum = sender.isOn
-    }
-
-    @objc private func dohToggleChanged(_ sender: UISwitch) {
-        settings.dohEnabled = sender.isOn
-//        if sender.isOn {
-//            ProxyManager.shared.restart()
-//        } else {
-//            ProxyManager.shared.disable()
-//            DoHResolver.shared.clearCache()
-//        }
-        reloadNetworkSection()
-    }
-
-    private func reloadNetworkSection() {
-        if let idx = visibleSections.firstIndex(of: .network) {
-            tableView.reloadSections(IndexSet(integer: idx), with: .automatic)
-        }
     }
 
     private func reloadAppearanceSection() {
@@ -438,25 +425,6 @@ extension SettingsViewController {
         present(alert, animated: true)
     }
 
-    private func showDohProviderPicker(from sourceView: UIView?) {
-        let alert = UIAlertController(title: "DoH Provider", message: nil, preferredStyle: .actionSheet)
-        for provider in AppSettings.DoHProvider.allCases {
-            let action = UIAlertAction(title: provider.title, style: .default) { [weak self] _ in
-                self?.settings.dohProvider = provider
-//                DoHResolver.shared.clearCache()
-//                ProxyManager.shared.restart()
-                self?.reloadNetworkSection()
-            }
-            if provider == settings.dohProvider {
-                action.setValue(true, forKey: "checked")
-            }
-            alert.addAction(action)
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        Self.anchorPopover(alert, to: sourceView)
-        present(alert, animated: true)
-    }
-
     private static func anchorPopover(_ alert: UIAlertController, to view: UIView?) {
         guard let view, let popover = alert.popoverPresentationController else { return }
         popover.sourceView = view
@@ -466,14 +434,18 @@ extension SettingsViewController {
 
     #if DEBUG
     private func showRenderPreviewInput() {
-        let alert = UIAlertController(title: "Render Preview", message: "Enter Topic URL", preferredStyle: .alert)
+        let alert = UIAlertController(
+            title: String(localized: "settings.debug.render_preview"),
+            message: String(localized: "settings.debug.render_preview.message"),
+            preferredStyle: .alert
+        )
         alert.addTextField { textField in
             textField.placeholder = "https://linux.do/t/topic/12345"
             textField.keyboardType = .URL
             textField.autocapitalizationType = .none
             textField.autocorrectionType = .no
         }
-        alert.addAction(UIAlertAction(title: "Open", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: String(localized: "action.open"), style: .default) { [weak self] _ in
             guard let self,
                   let text = alert.textFields?.first?.text,
                   let url = URL(string: text),
@@ -486,28 +458,9 @@ extension SettingsViewController {
             let vc = TopicDetailControllerFactory.make(api: api, topicId: topicId)
             self.navigationController?.pushViewController(vc, animated: true)
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
         present(alert, animated: true)
     }
     #endif
 
-    private func showCustomURLInput() {
-        let alert = UIAlertController(title: "Custom DoH URL", message: "Enter DNS over HTTPS server address", preferredStyle: .alert)
-        alert.addTextField { [weak self] textField in
-            textField.text = self?.settings.dohCustomURL
-            textField.placeholder = "https://example.com/dns-query"
-            textField.keyboardType = .URL
-            textField.autocapitalizationType = .none
-        }
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-            if let url = alert.textFields?.first?.text {
-                self?.settings.dohCustomURL = url
-//                DoHResolver.shared.clearCache()
-//                ProxyManager.shared.restart()
-                self?.reloadNetworkSection()
-            }
-        })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(alert, animated: true)
-    }
 }

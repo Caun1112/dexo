@@ -49,7 +49,11 @@ final class ChallengeViewController: BaseViewController {
     private let targetURL: URL
     private let userAgent: String?
 
-    private lazy var webView: WKWebView = {
+    private var webView: WKWebView?
+    private var proxyLease: AnyObject?
+    private var setupTask: Task<Void, Never>?
+
+    private func makeWebViewConfiguration() async throws -> (WKWebViewConfiguration, AnyObject?) {
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
@@ -59,18 +63,9 @@ final class ChallengeViewController: BaseViewController {
             forMainFrameOnly: true
         )
         config.userContentController.addUserScript(darkModeCSS)
-
-        let wv = WKWebView(frame: .zero, configuration: config)
-        wv.navigationDelegate = coordinator
-        wv.uiDelegate = coordinator
-        wv.isOpaque = false
-        wv.backgroundColor = .systemBackground
-        if let ua = userAgent {
-            wv.customUserAgent = ua
-        }
-        wv.translatesAutoresizingMaskIntoConstraints = false
-        return wv
-    }()
+        let lease = try await WebViewDoHConfigurator.configure(config, originURL: targetURL)
+        return (config, lease)
+    }
 
     private lazy var coordinator = Coordinator(onNavigationFinished: { [weak self] in
         self?.syncCookies()
@@ -103,32 +98,78 @@ final class ChallengeViewController: BaseViewController {
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: String(localized: "challenge.done"), style: .done, target: self, action: #selector(doneTapped)
         )
+        navigationItem.rightBarButtonItem?.isEnabled = false
 
-        view.addSubview(webView)
         view.addSubview(progressView)
         NSLayoutConstraint.activate([
             progressView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             progressView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: progressView.bottomAnchor),
-            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        progressObservation = webView.observe(\.estimatedProgress, options: .new) { [weak self] wv, _ in
-            self?.progressView.progress = Float(wv.estimatedProgress)
-            self?.progressView.isHidden = wv.estimatedProgress >= 1.0
-        }
-
-        Task { @MainActor in
-            await seedCookies()
-            webView.load(URLRequest(url: targetURL))
+        setupTask = Task { [weak self] in
+            await self?.setUpWebView()
         }
     }
 
+    private func setUpWebView() async {
+        do {
+            let (configuration, lease) = try await makeWebViewConfiguration()
+            guard !Task.isCancelled else { return }
+
+            proxyLease = lease
+            let webView = WKWebView(frame: .zero, configuration: configuration)
+            webView.navigationDelegate = coordinator
+            webView.uiDelegate = coordinator
+            webView.isOpaque = false
+            webView.backgroundColor = .systemBackground
+            if let userAgent {
+                webView.customUserAgent = userAgent
+            }
+            webView.translatesAutoresizingMaskIntoConstraints = false
+            self.webView = webView
+
+            view.insertSubview(webView, belowSubview: progressView)
+            NSLayoutConstraint.activate([
+                webView.topAnchor.constraint(equalTo: progressView.bottomAnchor),
+                webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ])
+
+            progressObservation = webView.observe(\.estimatedProgress, options: .new) { [weak self] webView, _ in
+                self?.progressView.progress = Float(webView.estimatedProgress)
+                self?.progressView.isHidden = webView.estimatedProgress >= 1.0
+            }
+            navigationItem.rightBarButtonItem?.isEnabled = true
+
+            await seedCookies(in: webView)
+            guard !Task.isCancelled else { return }
+            let initialURL = WebViewDoHConfigurator.proxiedURL(targetURL, lease: lease)
+            webView.load(URLRequest(url: initialURL))
+        } catch {
+            guard !Task.isCancelled else { return }
+            showProxyUnavailableAlert()
+        }
+    }
+
+    private func showProxyUnavailableAlert() {
+        let alert = UIAlertController(
+            title: String(localized: "doh.proxy.error.title"),
+            message: String(localized: "doh.proxy.error.message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default) { [weak self] _ in
+            self?.dismiss(animated: true)
+        })
+        present(alert, animated: true)
+    }
+
     @MainActor
-    private func seedCookies() async {
+    private func seedCookies(in webView: WKWebView) async {
+        // The URLSession gateway owns the real-origin cookie jar. Seeding the
+        // loopback WKWebView would create unrelated 127.0.0.1 cookies.
+        if proxyLease != nil { return }
         let cookies = WebCookieStore.shared.cookies(for: targetURL)
         let store = webView.configuration.websiteDataStore.httpCookieStore
         for cookie in cookies {
@@ -146,7 +187,13 @@ final class ChallengeViewController: BaseViewController {
 
     @MainActor
     private func syncWebSession() async {
-        await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
+        guard let webView else { return }
+        let gatewayCookies = WebViewDoHConfigurator.cookies(lease: proxyLease)
+        if gatewayCookies.isEmpty {
+            await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
+        } else {
+            WebCookieStore.shared.setCookies(gatewayCookies)
+        }
 
         // Cloudflare clearance can be tied to the browser User-Agent. Keep
         // the API request consistent with the WKWebView that passed the
@@ -160,6 +207,7 @@ final class ChallengeViewController: BaseViewController {
     }
 
     @objc private func cancelTapped() {
+        setupTask?.cancel()
         dismiss(animated: true)
     }
 
@@ -188,12 +236,6 @@ final class ChallengeViewController: BaseViewController {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             onNavigationFinished()
-        }
-
-        func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
-                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void)
-        {
-            completionHandler(.performDefaultHandling, nil)
         }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,

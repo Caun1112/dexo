@@ -13,6 +13,10 @@ import UIKit
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        if !EncryptedDNSManager.shared.applyCurrentSettings() {
+            AppSettings.shared.dohEnabled = false
+        }
+
         SDImageCodersManager.shared.addCoder(SDImageSVGCoder.shared)
 
         // One-time: clear legacy shared cache (all images now use per-type caches)

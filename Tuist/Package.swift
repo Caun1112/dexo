@@ -2,6 +2,24 @@
 
 import PackageDescription
 
+#if TUIST
+import struct ProjectDescription.PackageSettings
+import struct ProjectDescription.Settings
+
+let packageSettings = PackageSettings(
+    targetSettings: [
+        // Swift macros are host compiler plugins, not distributable app
+        // executables. Xcode 27 rejects the plugin protocol when this helper
+        // inherits the app's signing identity and entitlements.
+        "PerceptionMacros": .settings(base: [
+            "CODE_SIGNING_ALLOWED": "NO",
+            "CODE_SIGNING_REQUIRED": "NO",
+            "CODE_SIGN_IDENTITY": "",
+        ]),
+    ]
+)
+#endif
+
 let package = Package(
     name: "dexo",
     dependencies: [
