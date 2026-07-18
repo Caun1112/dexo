@@ -1,5 +1,4 @@
 #if DEBUG
-import Security
 import UIKit
 
 /// Debug-only client used to verify the local MITM proxy without involving
@@ -11,7 +10,7 @@ final class URLSessionProxyTestViewController: BaseViewController {
     private enum SetupError: Error {
         case unsupportedOS
         case proxyUnavailable
-        case missingCertificate
+        case missingTrustEvaluator
     }
 
     private var proxyLease: AnyObject?
@@ -178,13 +177,11 @@ final class URLSessionProxyTestViewController: BaseViewController {
                 throw SetupError.proxyUnavailable
             }
             guard !Task.isCancelled else { return }
-            guard let certificateData = WebViewDoHConfigurator.caCertificateData,
-                  let certificate = SecCertificateCreateWithData(nil, certificateData as CFData)
-            else {
-                throw SetupError.missingCertificate
+            guard let trustEvaluator = WebViewDoHConfigurator.makeTrustEvaluator() else {
+                throw SetupError.missingTrustEvaluator
             }
 
-            let delegate = URLSessionProxyTrustDelegate(caCertificate: certificate)
+            let delegate = URLSessionProxyTrustDelegate(trustEvaluator: trustEvaluator)
             proxyLease = lease
             sessionDelegate = delegate
             session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
@@ -321,10 +318,10 @@ final class URLSessionProxyTestViewController: BaseViewController {
 }
 
 private nonisolated final class URLSessionProxyTrustDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
-    private let caCertificate: SecCertificate
+    private let trustEvaluator: WebViewProxyTrustEvaluator
 
-    init(caCertificate: SecCertificate) {
-        self.caCertificate = caCertificate
+    init(trustEvaluator: WebViewProxyTrustEvaluator) {
+        self.trustEvaluator = trustEvaluator
         super.init()
     }
 
@@ -333,24 +330,15 @@ private nonisolated final class URLSessionProxyTrustDelegate: NSObject, URLSessi
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let trust = challenge.protectionSpace.serverTrust
-        else {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust else {
             completionHandler(.performDefaultHandling, nil)
             return
         }
-
-        SecTrustSetAnchorCertificates(trust, [caCertificate] as CFArray)
-        SecTrustSetAnchorCertificatesOnly(trust, false)
-        var error: CFError?
-        if SecTrustEvaluateWithError(trust, &error) {
+        if let credential = trustEvaluator.credential(for: challenge) {
             print("[URLSessionProxyTest] accepted proxy CA for \(challenge.protectionSpace.host)")
-            completionHandler(.useCredential, URLCredential(trust: trust))
+            completionHandler(.useCredential, credential)
         } else {
-            print(
-                "[URLSessionProxyTest] rejected proxy CA for "
-                    + "\(challenge.protectionSpace.host): \(String(describing: error))"
-            )
+            print("[URLSessionProxyTest] rejected proxy CA for \(challenge.protectionSpace.host)")
             completionHandler(.cancelAuthenticationChallenge, nil)
         }
     }

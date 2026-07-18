@@ -1,6 +1,5 @@
 import UIKit
 import WebKit
-import Security
 
 extension UIViewController {
     /// Presents the shared Cloudflare challenge prompt and opens the existing
@@ -64,7 +63,7 @@ final class ChallengeViewController: BaseViewController {
             forMainFrameOnly: true
         )
         config.userContentController.addUserScript(darkModeCSS)
-        let lease = try await WebViewDoHConfigurator.configure(config, originURL: targetURL)
+        let lease = try await WebViewDoHConfigurator.configure(config)
         return (config, lease)
     }
 
@@ -146,8 +145,7 @@ final class ChallengeViewController: BaseViewController {
 
             await seedCookies(in: webView)
             guard !Task.isCancelled else { return }
-            let initialURL = WebViewDoHConfigurator.proxiedURL(targetURL, lease: lease)
-            webView.load(URLRequest(url: initialURL))
+            webView.load(URLRequest(url: targetURL))
         } catch {
             guard !Task.isCancelled else { return }
             showProxyUnavailableAlert()
@@ -189,12 +187,7 @@ final class ChallengeViewController: BaseViewController {
     @MainActor
     private func syncWebSession() async {
         guard let webView else { return }
-        let gatewayCookies = WebViewDoHConfigurator.cookies(lease: proxyLease)
-        if gatewayCookies.isEmpty {
-            await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
-        } else {
-            WebCookieStore.shared.setCookies(gatewayCookies)
-        }
+        await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
 
         // Cloudflare clearance can be tied to the browser User-Agent. Keep
         // the API request consistent with the WKWebView that passed the
@@ -230,17 +223,11 @@ final class ChallengeViewController: BaseViewController {
 
     private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let onNavigationFinished: () -> Void
-        private let caCert: SecCertificate?
-        private let proxyRunning: Bool
+        private let trustEvaluator: WebViewProxyTrustEvaluator?
 
         init(onNavigationFinished: @escaping () -> Void) {
             self.onNavigationFinished = onNavigationFinished
-            if let data = WebViewDoHConfigurator.caCertificateData {
-                caCert = SecCertificateCreateWithData(nil, data as CFData)
-            } else {
-                caCert = nil
-            }
-            proxyRunning = WebViewDoHConfigurator.proxyRunning
+            trustEvaluator = WebViewDoHConfigurator.makeTrustEvaluator()
         }
 
         func webView(
@@ -248,23 +235,12 @@ final class ChallengeViewController: BaseViewController {
             didReceive challenge: URLAuthenticationChallenge,
             completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
         ) {
-            guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-                  let trust = challenge.protectionSpace.serverTrust
-            else {
-                completionHandler(.performDefaultHandling, nil)
+            if let credential = trustEvaluator?.credential(for: challenge) {
+                #if DEBUG
+                print("[WebViewDoHProxy] Challenge accepted proxy CA for \(challenge.protectionSpace.host)")
+                #endif
+                completionHandler(.useCredential, credential)
                 return
-            }
-            if let caCert, proxyRunning {
-                SecTrustSetAnchorCertificates(trust, [caCert] as CFArray)
-                SecTrustSetAnchorCertificatesOnly(trust, false)
-                var error: CFError?
-                if SecTrustEvaluateWithError(trust, &error) {
-                    #if DEBUG
-                    print("[WebViewDoHProxy] Challenge accepted proxy CA for \(challenge.protectionSpace.host)")
-                    #endif
-                    completionHandler(.useCredential, URLCredential(trust: trust))
-                    return
-                }
             }
             completionHandler(.performDefaultHandling, nil)
         }

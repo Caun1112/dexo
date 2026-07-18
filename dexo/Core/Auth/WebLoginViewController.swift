@@ -1,6 +1,5 @@
 import UIKit
 import WebKit
-import Security
 
 /// Presents a WKWebView so users can log in to a Discourse forum via their browser.
 /// Fires onSuccess once the Discourse session cookie `_t` is detected.
@@ -31,7 +30,7 @@ final class WebLoginViewController: BaseViewController {
             forMainFrameOnly: true
         )
         config.userContentController.addUserScript(darkModeCSS)
-        let lease = try await WebViewDoHConfigurator.configure(config, originURL: targetURL)
+        let lease = try await WebViewDoHConfigurator.configure(config)
         return (config, lease)
     }
 
@@ -108,8 +107,7 @@ final class WebLoginViewController: BaseViewController {
                 self?.progressView.isHidden = webView.estimatedProgress >= 1.0
             }
             navigationItem.rightBarButtonItem?.isEnabled = true
-            let initialURL = WebViewDoHConfigurator.proxiedURL(targetURL, lease: lease)
-            webView.load(URLRequest(url: initialURL))
+            webView.load(URLRequest(url: targetURL))
         } catch {
             guard !Task.isCancelled else { return }
             showProxyUnavailableAlert()
@@ -137,7 +135,7 @@ final class WebLoginViewController: BaseViewController {
 
     @objc private func doneTapped() {
         guard let webView else { return }
-        coordinator.collectAndFire(from: webView, lease: proxyLease)
+        coordinator.collectAndFire(from: webView)
     }
 
     private func handleCookiesReady(_ cookies: [HTTPCookie]) {
@@ -217,19 +215,13 @@ final class WebLoginViewController: BaseViewController {
     private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let targetHost: String
         private let onCookiesReady: ([HTTPCookie]) -> Void
-        private let caCert: SecCertificate?
-        private let proxyRunning: Bool
+        private let trustEvaluator: WebViewProxyTrustEvaluator?
         private(set) var didCallback = false
 
         init(targetURL: URL, onCookiesReady: @escaping ([HTTPCookie]) -> Void) {
             self.targetHost = targetURL.host?.lowercased() ?? ""
             self.onCookiesReady = onCookiesReady
-            if let data = WebViewDoHConfigurator.caCertificateData {
-                caCert = SecCertificateCreateWithData(nil, data as CFData)
-            } else {
-                caCert = nil
-            }
-            proxyRunning = WebViewDoHConfigurator.proxyRunning
+            trustEvaluator = WebViewDoHConfigurator.makeTrustEvaluator()
         }
 
         func webView(
@@ -237,23 +229,12 @@ final class WebLoginViewController: BaseViewController {
             didReceive challenge: URLAuthenticationChallenge,
             completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
         ) {
-            guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-                  let trust = challenge.protectionSpace.serverTrust
-            else {
-                completionHandler(.performDefaultHandling, nil)
+            if let credential = trustEvaluator?.credential(for: challenge) {
+                #if DEBUG
+                print("[WebViewDoHProxy] WebLogin accepted proxy CA for \(challenge.protectionSpace.host)")
+                #endif
+                completionHandler(.useCredential, credential)
                 return
-            }
-            if let caCert, proxyRunning {
-                SecTrustSetAnchorCertificates(trust, [caCert] as CFArray)
-                SecTrustSetAnchorCertificatesOnly(trust, false)
-                var error: CFError?
-                if SecTrustEvaluateWithError(trust, &error) {
-                    #if DEBUG
-                    print("[WebViewDoHProxy] WebLogin accepted proxy CA for \(challenge.protectionSpace.host)")
-                    #endif
-                    completionHandler(.useCredential, URLCredential(trust: trust))
-                    return
-                }
             }
             completionHandler(.performDefaultHandling, nil)
         }
@@ -261,17 +242,8 @@ final class WebLoginViewController: BaseViewController {
         /// Collect cookies and fire the callback. Only invoked from the "Done" button tap —
         /// auto-dismiss on navigation finish / cookie change was intentionally removed so
         /// the user decides when to hand off to the app.
-        func collectAndFire(from webView: WKWebView, lease: AnyObject?) {
+        func collectAndFire(from webView: WKWebView) {
             guard !didCallback else { return }
-            let gatewayCookies = WebViewDoHConfigurator.cookies(lease: lease)
-            if !gatewayCookies.isEmpty {
-                let relevant = gatewayCookies.filter {
-                    WebCookieStore.cookieDomain($0.domain, matchesHost: targetHost)
-                }
-                didCallback = true
-                onCookiesReady(relevant)
-                return
-            }
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                 guard let self, !self.didCallback else { return }
                 let relevant = cookies.filter {

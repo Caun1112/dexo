@@ -91,3 +91,45 @@ final class HTTPProxyRequestParserTests: XCTestCase {
         }
     }
 }
+
+final class HTTPProxyResponseHeaderTests: XCTestCase {
+    func testKeepsExpiresDateCommaInsideSingleCookie() {
+        let header = "cf_clearance=value; Expires=Wed, 09 Jun 2027 10:18:14 GMT; Secure; HttpOnly"
+
+        XCTAssertEqual(
+            HTTPProxyResponseHeader.splitCombinedSetCookieHeader(header),
+            [header]
+        )
+    }
+
+    func testSplitsFlattenedCookiesWithoutLosingAttributes() {
+        let header = "cf_clearance=value; Secure; SameSite=None; Partitioned, __cf_bm=other; Path=/; Secure"
+
+        XCTAssertEqual(
+            HTTPProxyResponseHeader.splitCombinedSetCookieHeader(header),
+            [
+                "cf_clearance=value; Secure; SameSite=None; Partitioned",
+                "__cf_bm=other; Path=/; Secure",
+            ]
+        )
+    }
+
+    func testKeepsCommaInsideQuotedCookieValue() {
+        let header = "example=\"one,two\"; Path=/, second=value; Secure"
+
+        XCTAssertEqual(
+            HTTPProxyResponseHeader.splitCombinedSetCookieHeader(header),
+            [
+                "example=\"one,two\"; Path=/",
+                "second=value; Secure",
+            ]
+        )
+    }
+
+    func testExtractsCookieNameWithoutValue() {
+        XCTAssertEqual(
+            HTTPProxyResponseHeader.cookieName(from: " cf_clearance=secret; Secure"),
+            "cf_clearance"
+        )
+    }
+}

@@ -264,8 +264,8 @@ nonisolated final class WebViewDoHMITMTunnel: @unchecked Sendable {
 
             let values = (rawValue as? [String]) ?? [String(describing: rawValue)]
             if lowercaseName == "set-cookie" {
-                let cookieHeaders = values.flatMap(Self.splitCombinedSetCookieHeader)
-                let cookieNames = cookieHeaders.compactMap(Self.cookieName)
+                let cookieHeaders = values.flatMap(HTTPProxyResponseHeader.splitCombinedSetCookieHeader)
+                let cookieNames = cookieHeaders.compactMap(HTTPProxyResponseHeader.cookieName)
                 if !cookieNames.isEmpty {
                     log("forwarding Set-Cookie: \(cookieNames.joined(separator: ", "))")
                 }
@@ -380,10 +380,46 @@ nonisolated final class WebViewDoHMITMTunnel: @unchecked Sendable {
         return "\n" + text
     }
 
-    /// URLSession can flatten repeated Set-Cookie fields into one comma-
-    /// separated value. Split only at a comma followed by a new cookie name;
-    /// the comma inside an Expires date is intentionally preserved.
-    private static func splitCombinedSetCookieHeader(_ value: String) -> [String] {
+    private static func reasonPhrase(_ statusCode: Int) -> String {
+        switch statusCode {
+        case 100: "Continue"
+        case 200: "OK"
+        case 201: "Created"
+        case 202: "Accepted"
+        case 204: "No Content"
+        case 206: "Partial Content"
+        case 301: "Moved Permanently"
+        case 302: "Found"
+        case 303: "See Other"
+        case 304: "Not Modified"
+        case 307: "Temporary Redirect"
+        case 308: "Permanent Redirect"
+        case 400: "Bad Request"
+        case 401: "Unauthorized"
+        case 403: "Forbidden"
+        case 404: "Not Found"
+        case 405: "Method Not Allowed"
+        case 408: "Request Timeout"
+        case 409: "Conflict"
+        case 410: "Gone"
+        case 413: "Content Too Large"
+        case 415: "Unsupported Media Type"
+        case 422: "Unprocessable Content"
+        case 429: "Too Many Requests"
+        case 500: "Internal Server Error"
+        case 502: "Bad Gateway"
+        case 503: "Service Unavailable"
+        case 504: "Gateway Timeout"
+        default: "HTTP Response"
+        }
+    }
+}
+
+/// Normalizes response fields that URLSession exposes in a flattened form.
+nonisolated enum HTTPProxyResponseHeader {
+    /// Split only at a comma followed by a new cookie name. The comma inside
+    /// an Expires date and commas inside quoted values are preserved.
+    static func splitCombinedSetCookieHeader(_ value: String) -> [String] {
         var headers: [String] = []
         var start = value.startIndex
         var index = value.startIndex
@@ -433,43 +469,9 @@ nonisolated final class WebViewDoHMITMTunnel: @unchecked Sendable {
         return false
     }
 
-    private static func cookieName(from header: String) -> String? {
+    static func cookieName(from header: String) -> String? {
         guard let equals = header.firstIndex(of: "=") else { return nil }
         let name = header[..<equals].trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? nil : name
-    }
-
-    private static func reasonPhrase(_ statusCode: Int) -> String {
-        switch statusCode {
-        case 100: "Continue"
-        case 200: "OK"
-        case 201: "Created"
-        case 202: "Accepted"
-        case 204: "No Content"
-        case 206: "Partial Content"
-        case 301: "Moved Permanently"
-        case 302: "Found"
-        case 303: "See Other"
-        case 304: "Not Modified"
-        case 307: "Temporary Redirect"
-        case 308: "Permanent Redirect"
-        case 400: "Bad Request"
-        case 401: "Unauthorized"
-        case 403: "Forbidden"
-        case 404: "Not Found"
-        case 405: "Method Not Allowed"
-        case 408: "Request Timeout"
-        case 409: "Conflict"
-        case 410: "Gone"
-        case 413: "Content Too Large"
-        case 415: "Unsupported Media Type"
-        case 422: "Unprocessable Content"
-        case 429: "Too Many Requests"
-        case 500: "Internal Server Error"
-        case 502: "Bad Gateway"
-        case 503: "Service Unavailable"
-        case 504: "Gateway Timeout"
-        default: "HTTP Response"
-        }
     }
 }

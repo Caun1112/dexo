@@ -1,14 +1,12 @@
 #if DEBUG
 import UIKit
 import WebKit
-import Security
 
 /// Debug-only browser used to verify that WKWebView traffic traverses the
-/// in-process HTTP CONNECT proxy configured by the current DoH settings.
+/// in-process HTTP CONNECT proxy independently of the DoH switch.
 final class WebViewProxyTestViewController: BaseViewController {
     private enum SetupError: Error {
         case unsupportedOS
-        case dohDisabled
         case proxyUnavailable
     }
 
@@ -16,8 +14,7 @@ final class WebViewProxyTestViewController: BaseViewController {
     private var proxyLease: AnyObject?
     private var setupTask: Task<Void, Never>?
     private var progressObservation: NSKeyValueObservation?
-    private var caCert: SecCertificate?
-    private var proxyRunning = false
+    private var trustEvaluator: WebViewProxyTrustEvaluator?
 
     private let addressBar = UIView()
 
@@ -136,12 +133,10 @@ final class WebViewProxyTestViewController: BaseViewController {
             guard !Task.isCancelled else { return }
 
             proxyLease = lease
-            if let data = WebViewDoHConfigurator.caCertificateData {
-                caCert = SecCertificateCreateWithData(nil, data as CFData)
-            } else {
-                caCert = nil
+            guard let trustEvaluator = WebViewDoHConfigurator.makeTrustEvaluator() else {
+                throw SetupError.proxyUnavailable
             }
-            proxyRunning = WebViewDoHConfigurator.proxyRunning
+            self.trustEvaluator = trustEvaluator
             let webView = WKWebView(frame: .zero, configuration: configuration)
             webView.translatesAutoresizingMaskIntoConstraints = false
             webView.navigationDelegate = self
@@ -183,8 +178,7 @@ final class WebViewProxyTestViewController: BaseViewController {
 
         addressField.text = url.absoluteString
         addressField.resignFirstResponder()
-        let requestURL = WebViewDoHConfigurator.proxiedURL(url, lease: proxyLease)
-        webView.load(URLRequest(url: requestURL))
+        webView.load(URLRequest(url: url))
     }
 
     private static func normalizedURL(from input: String) -> URL? {
@@ -216,9 +210,6 @@ final class WebViewProxyTestViewController: BaseViewController {
         case SetupError.unsupportedOS:
             title = String(localized: "settings.debug.webview_proxy_test.unsupported.title")
             message = String(localized: "settings.debug.webview_proxy_test.unsupported.message")
-        case SetupError.dohDisabled:
-            title = String(localized: "settings.debug.webview_proxy_test.doh_disabled.title")
-            message = String(localized: "settings.debug.webview_proxy_test.doh_disabled.message")
         default:
             title = String(localized: "doh.proxy.error.title")
             message = String(localized: "doh.proxy.error.message")
@@ -265,33 +256,21 @@ extension WebViewProxyTestViewController: WKNavigationDelegate, WKUIDelegate {
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let trust = challenge.protectionSpace.serverTrust
-        else {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust else {
             completionHandler(.performDefaultHandling, nil)
             return
         }
-        if let caCert, proxyRunning {
-            SecTrustSetAnchorCertificates(trust, [caCert] as CFArray)
-            SecTrustSetAnchorCertificatesOnly(trust, false)
-            var error: CFError?
-            if SecTrustEvaluateWithError(trust, &error) {
-                print("[WebViewProxyTest] accepted proxy CA for \(challenge.protectionSpace.host)")
-                completionHandler(.useCredential, URLCredential(trust: trust))
-                return
-            }
-            print(
-                "[WebViewProxyTest] rejected proxy CA for "
-                    + "\(challenge.protectionSpace.host): \(String(describing: error))"
-            )
+        if let credential = trustEvaluator?.credential(for: challenge) {
+            print("[WebViewProxyTest] accepted proxy CA for \(challenge.protectionSpace.host)")
+            completionHandler(.useCredential, credential)
+            return
         }
+        print("[WebViewProxyTest] rejected proxy CA for \(challenge.protectionSpace.host)")
         completionHandler(.performDefaultHandling, nil)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        addressField.text = WebViewDoHConfigurator
-            .originalURL(webView.url, lease: proxyLease)?
-            .absoluteString
+        addressField.text = webView.url?.absoluteString
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

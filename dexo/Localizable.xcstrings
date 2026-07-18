@@ -3779,40 +3779,6 @@
         }
       }
     },
-    "settings.debug.webview_proxy_test.doh_disabled.message" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enable DoH in Network settings before opening the proxy test."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先在网络设置中开启 DoH，再打开代理测试。"
-          }
-        }
-      }
-    },
-    "settings.debug.webview_proxy_test.doh_disabled.title" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "DoH Is Disabled"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "DoH 未开启"
-          }
-        }
-      }
-    },
     "settings.debug.webview_proxy_test.invalid_url.message" : {
       "extractionState" : "stale",
       "localizations" : {

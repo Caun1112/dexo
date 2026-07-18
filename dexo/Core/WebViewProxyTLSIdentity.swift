@@ -14,9 +14,9 @@ nonisolated final class WebViewProxyTLSIdentity: @unchecked Sendable {
     }
 }
 
-/// App-local certificate authority used only by the debug WKWebView MITM test.
-/// A leaf certificate with an exact SAN is generated and signed for every
-/// CONNECT hostname. Nothing is installed into the system trust store.
+/// App-local certificate authority for the WKWebView DoH proxy. A leaf
+/// certificate with an exact SAN is generated and signed for every CONNECT
+/// hostname. Nothing is installed into the system trust store.
 @available(iOS 17.0, *)
 nonisolated final class WebViewProxyCertificateAuthority: @unchecked Sendable {
     enum AuthorityError: Error {
@@ -104,8 +104,8 @@ nonisolated final class WebViewProxyCertificateAuthority: @unchecked Sendable {
             return cached
         }
 
-        let keyTag = Data("com.eilgnaw.dexo.debug-mitm.\(sessionID).\(UUID().uuidString)".utf8)
-        let certificateLabel = "Dexo Debug MITM \(sessionID) \(host)"
+        let keyTag = Data("com.eilgnaw.dexo.webview-mitm.\(sessionID).\(UUID().uuidString)".utf8)
+        let certificateLabel = "Dexo WebView MITM \(sessionID) \(host)"
         var shouldCleanUp = true
         defer {
             if shouldCleanUp {

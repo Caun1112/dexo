@@ -41,7 +41,7 @@ final class EncryptedDNSManager {
         }
 
         if #available(iOS 17.0, *) {
-            // Existing gateway sessions may keep resolved addresses and open
+            // Existing proxy sessions may keep resolved addresses and open
             // connections, so changing the resolver must rebuild them.
             WebViewDoHProxy.shared.stop()
         }

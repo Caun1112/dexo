@@ -8,10 +8,7 @@ import WebKit
 /// The proxy terminates local TLS, while URLSession performs upstream TLS with
 /// the app's encrypted resolver configuration.
 enum WebViewDoHConfigurator {
-    static func configure(
-        _ configuration: WKWebViewConfiguration,
-        originURL: URL
-    ) async throws -> AnyObject? {
+    static func configure(_ configuration: WKWebViewConfiguration) async throws -> AnyObject? {
         guard #available(iOS 17.0, *) else { return nil }
 
         let dataStore = WKWebsiteDataStore.default()
@@ -54,26 +51,41 @@ enum WebViewDoHConfigurator {
         return lease
     }
 
-    static func proxiedURL(_ remoteURL: URL, lease: AnyObject?) -> URL {
-        remoteURL
-    }
-
-    static func originalURL(_ url: URL?, lease: AnyObject?) -> URL? {
-        url
-    }
-
-    static func cookies(lease: AnyObject?) -> [HTTPCookie] {
-        []
-    }
-
-    static var caCertificateData: Data? {
+    static func makeTrustEvaluator() -> WebViewProxyTrustEvaluator? {
         guard #available(iOS 17.0, *) else { return nil }
-        return WebViewDoHProxy.shared.caCertificateData
+        guard let certificateData = WebViewDoHProxy.shared.caCertificateData else { return nil }
+        return WebViewProxyTrustEvaluator(certificateData: certificateData)
+    }
+}
+
+/// Evaluates the server-trust challenge produced by the app's loopback MITM
+/// proxy against its private CA. The host policy already attached to SecTrust
+/// is preserved, so a certificate for another hostname is still rejected.
+nonisolated final class WebViewProxyTrustEvaluator: @unchecked Sendable {
+    private let caCertificate: SecCertificate
+
+    init?(certificateData: Data) {
+        guard let certificate = SecCertificateCreateWithData(nil, certificateData as CFData) else {
+            return nil
+        }
+        caCertificate = certificate
     }
 
-    static var proxyRunning: Bool {
-        guard #available(iOS 17.0, *) else { return false }
-        return WebViewDoHProxy.shared.isRunning
+    func credential(for challenge: URLAuthenticationChallenge) -> URLCredential? {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust
+        else {
+            return nil
+        }
+
+        guard SecTrustSetAnchorCertificates(trust, [caCertificate] as CFArray) == errSecSuccess,
+              SecTrustSetAnchorCertificatesOnly(trust, false) == errSecSuccess
+        else {
+            return nil
+        }
+        var error: CFError?
+        guard SecTrustEvaluateWithError(trust, &error) else { return nil }
+        return URLCredential(trust: trust)
     }
 }
 
@@ -121,10 +133,6 @@ final class WebViewDoHProxy {
 
     var caCertificateData: Data? {
         certificateAuthority.map { SecCertificateCopyData($0.certificate) as Data }
-    }
-
-    var isRunning: Bool {
-        listenerPort != nil && listener != nil
     }
 
     func acquire() async throws -> Lease {
