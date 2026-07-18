@@ -1,6 +1,7 @@
 #if DEBUG
 import UIKit
 import WebKit
+import Security
 
 /// Debug-only browser used to verify that WKWebView traffic traverses the
 /// in-process HTTP CONNECT proxy configured by the current DoH settings.
@@ -15,6 +16,8 @@ final class WebViewProxyTestViewController: BaseViewController {
     private var proxyLease: AnyObject?
     private var setupTask: Task<Void, Never>?
     private var progressObservation: NSKeyValueObservation?
+    private var caCert: SecCertificate?
+    private var proxyRunning = false
 
     private let addressBar = UIView()
 
@@ -29,7 +32,7 @@ final class WebViewProxyTestViewController: BaseViewController {
         textField.autocorrectionType = .no
         textField.spellCheckingType = .no
         textField.placeholder = String(localized: "settings.debug.webview_proxy_test.address_placeholder")
-        textField.text = "https://linux.do/"
+        textField.text = "https://baidu.com/"
         textField.addTarget(self, action: #selector(openEnteredAddress), for: .editingDidEndOnExit)
         return textField
     }()
@@ -123,23 +126,22 @@ final class WebViewProxyTestViewController: BaseViewController {
             guard #available(iOS 17.0, *) else {
                 throw SetupError.unsupportedOS
             }
-            guard AppSettings.shared.dohEnabled else {
-                throw SetupError.dohDisabled
-            }
-
             let configuration = WKWebViewConfiguration()
             configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-            guard let originURL = Self.normalizedURL(from: addressField.text ?? ""),
-                  let lease = try await WebViewDoHConfigurator.configure(
-                      configuration,
-                      originURL: originURL
-                  )
+            guard Self.normalizedURL(from: addressField.text ?? "") != nil,
+                  let lease = try await WebViewDoHConfigurator.configureDebugMITM(configuration)
             else {
                 throw SetupError.proxyUnavailable
             }
             guard !Task.isCancelled else { return }
 
             proxyLease = lease
+            if let data = WebViewDoHConfigurator.caCertificateData {
+                caCert = SecCertificateCreateWithData(nil, data as CFData)
+            } else {
+                caCert = nil
+            }
+            proxyRunning = WebViewDoHConfigurator.proxyRunning
             let webView = WKWebView(frame: .zero, configuration: configuration)
             webView.translatesAutoresizingMaskIntoConstraints = false
             webView.navigationDelegate = self
@@ -263,11 +265,27 @@ extension WebViewProxyTestViewController: WKNavigationDelegate, WKUIDelegate {
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
-        if let credential = WebViewDoHConfigurator.credentialForLocalProxyChallenge(challenge) {
-            completionHandler(.useCredential, credential)
-        } else {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust
+        else {
             completionHandler(.performDefaultHandling, nil)
+            return
         }
+        if let caCert, proxyRunning {
+            SecTrustSetAnchorCertificates(trust, [caCert] as CFArray)
+            SecTrustSetAnchorCertificatesOnly(trust, false)
+            var error: CFError?
+            if SecTrustEvaluateWithError(trust, &error) {
+                print("[WebViewProxyTest] accepted proxy CA for \(challenge.protectionSpace.host)")
+                completionHandler(.useCredential, URLCredential(trust: trust))
+                return
+            }
+            print(
+                "[WebViewProxyTest] rejected proxy CA for "
+                    + "\(challenge.protectionSpace.host): \(String(describing: error))"
+            )
+        }
+        completionHandler(.performDefaultHandling, nil)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

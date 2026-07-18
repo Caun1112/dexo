@@ -129,22 +129,6 @@
         }
       }
     },
-    "action.save" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Save"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保存"
-          }
-        }
-      }
-    },
     "action.open" : {
       "localizations" : {
         "en" : {
@@ -157,6 +141,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开"
+          }
+        }
+      }
+    },
+    "action.save" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存"
           }
         }
       }
@@ -3490,6 +3490,261 @@
         }
       }
     },
+    "settings.debug.urlsession_proxy_test" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URLSession Proxy Test"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URLSession 代理测试"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.address_placeholder" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a URL"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入网址"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.binary_body" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<Binary response body>"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<二进制响应正文>"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.failed" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Request failed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求失败"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.no_http_response" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The task completed without an HTTP response."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务已结束，但没有收到 HTTP 响应。"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.ready" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local MITM proxy is ready"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地 MITM 代理已就绪"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.requesting" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requesting through the local proxy…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在通过本地代理请求…"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.result_placeholder" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The response status, headers, and body preview will appear here."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "响应状态、响应头和正文预览将显示在这里。"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.send" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.setup_failed.message" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The local proxy or its CA certificate could not be prepared."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法准备本地代理或其 CA 证书。"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.setup_failed.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Proxy Setup Failed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理初始化失败"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.starting" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting the local MITM proxy…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动本地 MITM 代理…"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.success_format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP %lld · %lld bytes captured"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP %lld · 已抓取 %lld 字节"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.unsupported.message" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The URLSession proxy test requires iOS 17 or later."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URLSession 代理测试需要 iOS 17 或更高版本。"
+          }
+        }
+      }
+    },
+    "settings.debug.urlsession_proxy_test.waiting_response" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for a response…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待响应…"
+          }
+        }
+      }
+    },
     "settings.debug.webview_proxy_test" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3802,22 +4057,6 @@
         }
       }
     },
-    "settings.doh.footer" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Uses this resolver for URLSession and image requests. On iOS 17 or later, in-app web pages also use it through a local proxy. It may conflict with VPN or Fake-IP proxy configurations."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用于 URLSession 和图片请求的域名解析。在 iOS 17 及以上版本，App 内网页也会通过本地代理使用该解析器。可能与 VPN 或 Fake-IP 代理配置冲突。"
-          }
-        }
-      }
-    },
     "settings.doh.endpoint" : {
       "localizations" : {
         "en" : {
@@ -3830,6 +4069,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "HTTPS 端点"
+          }
+        }
+      }
+    },
+    "settings.doh.footer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uses this resolver for URLSession and image requests. On iOS 17 or later, in-app web pages also use it through a local proxy. It may conflict with VPN or Fake-IP proxy configurations."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于 URLSession 和图片请求的域名解析。在 iOS 17 及以上版本，App 内网页也会通过本地代理使用该解析器。可能与 VPN 或 Fake-IP 代理配置冲突。"
           }
         }
       }
@@ -3851,6 +4106,7 @@
       }
     },
     "settings.doh.invalid.message" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3867,6 +4123,7 @@
       }
     },
     "settings.doh.invalid.title" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3994,22 +4251,6 @@
         }
       }
     },
-    "settings.doh.server" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "DoH Server"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "DoH 服务器"
-          }
-        }
-      }
-    },
     "settings.doh.root.enabled_format" : {
       "localizations" : {
         "en" : {
@@ -4042,6 +4283,22 @@
         }
       }
     },
+    "settings.doh.server" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DoH Server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DoH 服务器"
+          }
+        }
+      }
+    },
     "settings.doh.server.accessibility_hint" : {
       "localizations" : {
         "en" : {
@@ -4059,6 +4316,7 @@
       }
     },
     "settings.doh.server.message" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4091,6 +4349,7 @@
       }
     },
     "settings.doh.server.title" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

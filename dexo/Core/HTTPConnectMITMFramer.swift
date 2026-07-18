@@ -4,10 +4,10 @@ import Security
 
 @available(iOS 17.0, *)
 nonisolated final class WebViewMITMFramerContext: NSObject, @unchecked Sendable {
-    let identity: WebViewProxyTLSIdentity
+    let certificateAuthority: WebViewProxyCertificateAuthority
 
-    init(identity: WebViewProxyTLSIdentity) {
-        self.identity = identity
+    init(certificateAuthority: WebViewProxyCertificateAuthority) {
+        self.certificateAuthority = certificateAuthority
     }
 }
 
@@ -77,11 +77,27 @@ nonisolated final class HTTPConnectMITMFramer: NWProtocolFramerImplementation, @
         print("[WebViewDoHProxy] CONNECT \(request.host):\(request.port); upgrading to native TLS")
         #endif
 
+        let identity: WebViewProxyTLSIdentity
+        do {
+            identity = try context.certificateAuthority.identity(for: request.host)
+        } catch {
+            #if DEBUG
+            print("[WebViewDoHProxy] failed to sign certificate for \(request.host): \(error)")
+            #endif
+            fail(framer: framer, statusCode: 502, reason: "Certificate Error")
+            return 0
+        }
+
+        #if DEBUG
+        print("[WebViewDoHProxy] dynamically signed leaf certificate for \(identity.host)")
+        #endif
+
         let tlsOptions = NWProtocolTLS.Options()
         let securityOptions = tlsOptions.securityProtocolOptions
-        sec_protocol_options_set_local_identity(securityOptions, context.identity.networkIdentity)
+        sec_protocol_options_set_local_identity(securityOptions, identity.networkIdentity)
+        sec_protocol_options_set_peer_authentication_required(securityOptions, false)
         sec_protocol_options_add_tls_application_protocol(securityOptions, "http/1.1")
-        sec_protocol_options_set_min_tls_protocol_version(securityOptions, .TLSv12)
+        sec_protocol_options_set_min_tls_protocol_version(securityOptions, .TLSv13)
         sec_protocol_options_set_max_tls_protocol_version(securityOptions, .TLSv13)
 
         do {

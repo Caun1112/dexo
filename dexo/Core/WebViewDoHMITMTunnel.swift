@@ -153,6 +153,7 @@ nonisolated final class WebViewDoHMITMTunnel: @unchecked Sendable {
             .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "close" }
 
         log("\(request.method) \(forwarded.url?.absoluteString ?? request.target)")
+        logCapturedRequest(request, url: forwarded.url)
         let task = session.dataTask(with: forwarded) { [weak self] data, response, error in
             guard let self else { return }
             self.queue.async {
@@ -243,12 +244,12 @@ nonisolated final class WebViewDoHMITMTunnel: @unchecked Sendable {
             }
             forwarded.addValue(header.value, forHTTPHeaderField: header.name)
         }
-        forwarded.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         return forwarded
     }
 
     private func send(response: HTTPURLResponse, body: Data, closeAfterResponse: Bool) {
         guard !isStopped else { return }
+        logCapturedResponse(response, body: body)
         var data = Data("HTTP/1.1 \(response.statusCode) \(Self.reasonPhrase(response.statusCode))\r\n".utf8)
         for (rawName, rawValue) in response.allHeaderFields {
             let name = String(describing: rawName)
@@ -262,6 +263,18 @@ nonisolated final class WebViewDoHMITMTunnel: @unchecked Sendable {
             }
 
             let values = (rawValue as? [String]) ?? [String(describing: rawValue)]
+            if lowercaseName == "set-cookie" {
+                let cookieHeaders = values.flatMap(Self.splitCombinedSetCookieHeader)
+                let cookieNames = cookieHeaders.compactMap(Self.cookieName)
+                if !cookieNames.isEmpty {
+                    log("forwarding Set-Cookie: \(cookieNames.joined(separator: ", "))")
+                }
+                for value in cookieHeaders {
+                    guard !value.contains("\r"), !value.contains("\n") else { continue }
+                    data.append(Data("Set-Cookie: \(value)\r\n".utf8))
+                }
+                continue
+            }
             for value in values {
                 guard !name.contains("\r"), !name.contains("\n"),
                       !value.contains("\r"), !value.contains("\n")
@@ -327,6 +340,103 @@ nonisolated final class WebViewDoHMITMTunnel: @unchecked Sendable {
         #if DEBUG
         print("[WebViewDoHProxy \(id.uuidString.prefix(8))] \(message)")
         #endif
+    }
+
+    private func logCapturedRequest(_ request: HTTPProxyRequestParser.Request, url: URL?) {
+        #if DEBUG
+        let sensitiveHeaders: Set<String> = ["authorization", "cookie", "proxy-authorization"]
+        let headerText = request.headers.map { header in
+            let value = sensitiveHeaders.contains(header.name.lowercased()) ? "<redacted>" : header.value
+            return "\(header.name): \(value)"
+        }.joined(separator: "\n")
+        let bodyPreview = Self.textPreview(request.body)
+        print(
+            "[WebViewProxyCapture] >>> \(request.method) \(url?.absoluteString ?? request.target)\n"
+                + "\(headerText)\n"
+                + "body-bytes=\(request.body.count)\(bodyPreview)"
+        )
+        #endif
+    }
+
+    private func logCapturedResponse(_ response: HTTPURLResponse, body: Data) {
+        #if DEBUG
+        let headers = response.allHeaderFields.map {
+            "\(String(describing: $0.key)): \(String(describing: $0.value))"
+        }.sorted().joined(separator: "\n")
+        print(
+            "[WebViewProxyCapture] <<< \(response.statusCode) \(response.url?.absoluteString ?? "")\n"
+                + "\(headers)\n"
+                + "body-bytes=\(body.count)\(Self.textPreview(body))"
+        )
+        #endif
+    }
+
+    private static func textPreview(_ data: Data) -> String {
+        guard !data.isEmpty else { return "" }
+        let prefix = data.prefix(4_096)
+        guard let text = String(data: prefix, encoding: .utf8) else {
+            return "\n<binary>"
+        }
+        return "\n" + text
+    }
+
+    /// URLSession can flatten repeated Set-Cookie fields into one comma-
+    /// separated value. Split only at a comma followed by a new cookie name;
+    /// the comma inside an Expires date is intentionally preserved.
+    private static func splitCombinedSetCookieHeader(_ value: String) -> [String] {
+        var headers: [String] = []
+        var start = value.startIndex
+        var index = value.startIndex
+        var isQuoted = false
+        var isEscaped = false
+
+        while index < value.endIndex {
+            let character = value[index]
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\", isQuoted {
+                isEscaped = true
+            } else if character == "\"" {
+                isQuoted.toggle()
+            } else if character == ",", !isQuoted {
+                let candidateStart = value.index(after: index)
+                if looksLikeCookieStart(value[candidateStart...]) {
+                    let header = value[start..<index].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !header.isEmpty {
+                        headers.append(header)
+                    }
+                    start = candidateStart
+                }
+            }
+            index = value.index(after: index)
+        }
+
+        let finalHeader = value[start...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if !finalHeader.isEmpty {
+            headers.append(finalHeader)
+        }
+        return headers
+    }
+
+    private static func looksLikeCookieStart(_ substring: Substring) -> Bool {
+        let candidate = substring.drop(while: { $0 == " " || $0 == "\t" })
+        guard let first = candidate.first,
+              first != "=", first != ";", first != ","
+        else {
+            return false
+        }
+
+        for character in candidate {
+            if character == "=" { return true }
+            if character == ";" || character == "," || character.isWhitespace { return false }
+        }
+        return false
+    }
+
+    private static func cookieName(from header: String) -> String? {
+        guard let equals = header.firstIndex(of: "=") else { return nil }
+        let name = header[..<equals].trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
     private static func reasonPhrase(_ statusCode: Int) -> String {

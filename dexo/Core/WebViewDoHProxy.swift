@@ -24,6 +24,36 @@ enum WebViewDoHConfigurator {
         return lease
     }
 
+    /// Configures the debug browser for a pure local MITM capture. This path
+    /// intentionally ignores the DoH switch and uses normal URLSession
+    /// networking upstream so certificate interception can be tested alone.
+    static func configureDebugMITM(
+        _ configuration: WKWebViewConfiguration
+    ) async throws -> AnyObject? {
+        guard #available(iOS 17.0, *) else { return nil }
+
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        configuration.websiteDataStore = dataStore
+        dataStore.proxyConfigurations = []
+
+        let lease = try await WebViewDoHProxy.shared.acquireForDebugCapture()
+        dataStore.proxyConfigurations = [lease.proxyConfiguration]
+        return lease
+    }
+
+    /// Configures an ordinary URLSession to use the same local CONNECT proxy
+    /// as the WKWebView debug capture. Keeping this path separate makes it
+    /// possible to isolate URLSession TLS behavior from WebKit.
+    static func configureDebugMITM(
+        _ configuration: URLSessionConfiguration
+    ) async throws -> AnyObject? {
+        guard #available(iOS 17.0, *) else { return nil }
+
+        let lease = try await WebViewDoHProxy.shared.acquireForDebugCapture()
+        configuration.proxyConfigurations = [lease.proxyConfiguration]
+        return lease
+    }
+
     static func proxiedURL(_ remoteURL: URL, lease: AnyObject?) -> URL {
         remoteURL
     }
@@ -36,11 +66,14 @@ enum WebViewDoHConfigurator {
         []
     }
 
-    static func credentialForLocalProxyChallenge(
-        _ challenge: URLAuthenticationChallenge
-    ) -> URLCredential? {
+    static var caCertificateData: Data? {
         guard #available(iOS 17.0, *) else { return nil }
-        return WebViewDoHProxy.shared.credential(for: challenge)
+        return WebViewDoHProxy.shared.caCertificateData
+    }
+
+    static var proxyRunning: Bool {
+        guard #available(iOS 17.0, *) else { return false }
+        return WebViewDoHProxy.shared.isRunning
     }
 }
 
@@ -74,12 +107,25 @@ final class WebViewDoHProxy {
     private let queue = DispatchQueue(label: "xyz.47258.dexo.webview-native-mitm")
     private var listener: NWListener?
     private var listenerPort: NWEndpoint.Port?
-    private var identity: WebViewProxyTLSIdentity?
+    private var certificateAuthority: WebViewProxyCertificateAuthority?
     private var leases = Set<UUID>()
+    private var debugCaptureLeases = Set<UUID>()
     private var tunnels: [UUID: WebViewDoHMITMTunnel] = [:]
-    private var pendingAcquires: [CheckedContinuation<Lease, Error>] = []
+    private struct PendingAcquire {
+        let isDebugCapture: Bool
+        let continuation: CheckedContinuation<Lease, Error>
+    }
+    private var pendingAcquires: [PendingAcquire] = []
 
     private init() {}
+
+    var caCertificateData: Data? {
+        certificateAuthority.map { SecCertificateCopyData($0.certificate) as Data }
+    }
+
+    var isRunning: Bool {
+        listenerPort != nil && listener != nil
+    }
 
     func acquire() async throws -> Lease {
         guard AppSettings.shared.dohEnabled,
@@ -88,12 +134,25 @@ final class WebViewDoHProxy {
             throw ProxyError.invalidDoHConfiguration
         }
 
+        return try await acquire(isDebugCapture: false)
+    }
+
+    func acquireForDebugCapture() async throws -> Lease {
+        try await acquire(isDebugCapture: true)
+    }
+
+    private func acquire(isDebugCapture: Bool) async throws -> Lease {
         if let listenerPort {
-            return makeLease(port: listenerPort)
+            return makeLease(port: listenerPort, isDebugCapture: isDebugCapture)
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            pendingAcquires.append(continuation)
+            pendingAcquires.append(
+                PendingAcquire(
+                    isDebugCapture: isDebugCapture,
+                    continuation: continuation
+                )
+            )
             guard listener == nil else { return }
             do {
                 try startListener()
@@ -103,31 +162,14 @@ final class WebViewDoHProxy {
         }
     }
 
-    func credential(for challenge: URLAuthenticationChallenge) -> URLCredential? {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let trust = challenge.protectionSpace.serverTrust,
-              let identity,
-              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
-              let leaf = chain.first,
-              SecCertificateCopyData(leaf) as Data == identity.leafCertificateData
-        else {
-            return nil
-        }
-
-        #if DEBUG
-        print("[WebViewDoHProxy] accepted bundled local TLS identity for \(challenge.protectionSpace.host)")
-        #endif
-        return URLCredential(trust: trust)
-    }
-
     func stop() {
         WKWebsiteDataStore.default().proxyConfigurations = []
         stopListener(error: ProxyError.listenerStopped)
     }
 
     private func startListener() throws {
-        let identity = try WebViewProxyTLSIdentity.load()
-        self.identity = identity
+        let certificateAuthority = try WebViewProxyCertificateAuthority.load()
+        self.certificateAuthority = certificateAuthority
 
         let tcpOptions = NWProtocolTCP.Options()
         tcpOptions.enableKeepalive = true
@@ -135,7 +177,7 @@ final class WebViewDoHProxy {
         let parameters = NWParameters(tls: nil, tcp: tcpOptions)
         parameters.allowLocalEndpointReuse = true
         parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
-        let context = WebViewMITMFramerContext(identity: identity)
+        let context = WebViewMITMFramerContext(certificateAuthority: certificateAuthority)
         parameters.defaultProtocolStack.applicationProtocols.insert(
             HTTPConnectMITMFramer.options(context: context),
             at: 0
@@ -171,7 +213,14 @@ final class WebViewDoHProxy {
             #endif
             let continuations = pendingAcquires
             pendingAcquires.removeAll()
-            continuations.forEach { $0.resume(returning: makeLease(port: port)) }
+            continuations.forEach {
+                $0.continuation.resume(
+                    returning: makeLease(
+                        port: port,
+                        isDebugCapture: $0.isDebugCapture
+                    )
+                )
+            }
         case .failed(let error):
             stopListener(error: error)
         case .cancelled:
@@ -184,8 +233,8 @@ final class WebViewDoHProxy {
     }
 
     private func accept(_ connection: NWConnection) {
-        guard AppSettings.shared.dohEnabled,
-              listener != nil
+        guard listener != nil,
+              AppSettings.shared.dohEnabled || !debugCaptureLeases.isEmpty
         else {
             connection.cancel()
             return
@@ -206,9 +255,12 @@ final class WebViewDoHProxy {
         tunnel.start()
     }
 
-    private func makeLease(port: NWEndpoint.Port) -> Lease {
+    private func makeLease(port: NWEndpoint.Port, isDebugCapture: Bool) -> Lease {
         let id = UUID()
         leases.insert(id)
+        if isDebugCapture {
+            debugCaptureLeases.insert(id)
+        }
         let endpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: port)
         return Lease(
             id: id,
@@ -218,6 +270,7 @@ final class WebViewDoHProxy {
 
     private func release(_ id: UUID) {
         leases.remove(id)
+        debugCaptureLeases.remove(id)
         if leases.isEmpty, pendingAcquires.isEmpty {
             stopListener(error: nil)
         }
@@ -226,18 +279,18 @@ final class WebViewDoHProxy {
     private func failPendingAcquires(_ error: Error) {
         let continuations = pendingAcquires
         pendingAcquires.removeAll()
-        continuations.forEach { $0.resume(throwing: error) }
+        continuations.forEach { $0.continuation.resume(throwing: error) }
         listener?.cancel()
         listener = nil
         listenerPort = nil
-        identity = nil
+        certificateAuthority = nil
     }
 
     private func stopListener(error: Error?) {
         let activeListener = listener
         listener = nil
         listenerPort = nil
-        identity = nil
+        certificateAuthority = nil
         activeListener?.stateUpdateHandler = nil
         activeListener?.newConnectionHandler = nil
         activeListener?.cancel()
@@ -247,6 +300,7 @@ final class WebViewDoHProxy {
         activeTunnels.forEach { $0.cancel() }
 
         leases.removeAll()
+        debugCaptureLeases.removeAll()
         if !pendingAcquires.isEmpty {
             failPendingAcquires(error ?? ProxyError.listenerStopped)
         }

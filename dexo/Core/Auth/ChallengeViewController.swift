@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import Security
 
 extension UIViewController {
     /// Presents the shared Cloudflare challenge prompt and opens the existing
@@ -167,9 +168,9 @@ final class ChallengeViewController: BaseViewController {
 
     @MainActor
     private func seedCookies(in webView: WKWebView) async {
-        // The URLSession gateway owns the real-origin cookie jar. Seeding the
-        // loopback WKWebView would create unrelated 127.0.0.1 cookies.
-        if proxyLease != nil { return }
+        // The native MITM proxy keeps the original HTTPS URL, so WebKit still
+        // owns the real-origin cookie jar. Seed the existing login and
+        // Cloudflare state in both direct and proxied modes.
         let cookies = WebCookieStore.shared.cookies(for: targetURL)
         let store = webView.configuration.websiteDataStore.httpCookieStore
         for cookie in cookies {
@@ -229,9 +230,17 @@ final class ChallengeViewController: BaseViewController {
 
     private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let onNavigationFinished: () -> Void
+        private let caCert: SecCertificate?
+        private let proxyRunning: Bool
 
         init(onNavigationFinished: @escaping () -> Void) {
             self.onNavigationFinished = onNavigationFinished
+            if let data = WebViewDoHConfigurator.caCertificateData {
+                caCert = SecCertificateCreateWithData(nil, data as CFData)
+            } else {
+                caCert = nil
+            }
+            proxyRunning = WebViewDoHConfigurator.proxyRunning
         }
 
         func webView(
@@ -239,11 +248,25 @@ final class ChallengeViewController: BaseViewController {
             didReceive challenge: URLAuthenticationChallenge,
             completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
         ) {
-            if let credential = WebViewDoHConfigurator.credentialForLocalProxyChallenge(challenge) {
-                completionHandler(.useCredential, credential)
-            } else {
+            guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+                  let trust = challenge.protectionSpace.serverTrust
+            else {
                 completionHandler(.performDefaultHandling, nil)
+                return
             }
+            if let caCert, proxyRunning {
+                SecTrustSetAnchorCertificates(trust, [caCert] as CFArray)
+                SecTrustSetAnchorCertificatesOnly(trust, false)
+                var error: CFError?
+                if SecTrustEvaluateWithError(trust, &error) {
+                    #if DEBUG
+                    print("[WebViewDoHProxy] Challenge accepted proxy CA for \(challenge.protectionSpace.host)")
+                    #endif
+                    completionHandler(.useCredential, URLCredential(trust: trust))
+                    return
+                }
+            }
+            completionHandler(.performDefaultHandling, nil)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

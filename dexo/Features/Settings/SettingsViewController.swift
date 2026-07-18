@@ -74,6 +74,7 @@ final class SettingsViewController: ObservableViewController {
     private enum DebugRow: Int, CaseIterable {
         case renderPreview
         case webViewProxyTest
+        case urlSessionProxyTest
     }
     #endif
 }
@@ -154,6 +155,8 @@ extension SettingsViewController: UITableViewDataSource {
                 return makeRenderPreviewCell(tableView, indexPath: indexPath)
             case .webViewProxyTest:
                 return makeWebViewProxyTestCell(tableView, indexPath: indexPath)
+            case .urlSessionProxyTest:
+                return makeURLSessionProxyTestCell(tableView, indexPath: indexPath)
             }
         #endif
         }
@@ -295,6 +298,14 @@ extension SettingsViewController: UITableViewDataSource {
         cell.accessoryType = .disclosureIndicator
         return cell
     }
+
+    private func makeURLSessionProxyTestCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        applyFonts(to: cell)
+        cell.textLabel?.text = String(localized: "settings.debug.urlsession_proxy_test")
+        cell.accessoryType = .disclosureIndicator
+        return cell
+    }
     #endif
 }
 
@@ -346,6 +357,9 @@ extension SettingsViewController: UITableViewDelegate {
                 showRenderPreviewInput()
             case .webViewProxyTest:
                 let viewController = WebViewProxyTestViewController()
+                navigationController?.pushViewController(viewController, animated: true)
+            case .urlSessionProxyTest:
+                let viewController = URLSessionProxyTestViewController()
                 navigationController?.pushViewController(viewController, animated: true)
             }
         #endif

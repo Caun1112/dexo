@@ -149,7 +149,7 @@
 	<string>Allow Dexo to save images from posts to your Photos library.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
+		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>UIApplicationSceneManifest</key>

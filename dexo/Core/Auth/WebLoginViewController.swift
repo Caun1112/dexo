@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import Security
 
 /// Presents a WKWebView so users can log in to a Discourse forum via their browser.
 /// Fires onSuccess once the Discourse session cookie `_t` is detected.
@@ -216,11 +217,19 @@ final class WebLoginViewController: BaseViewController {
     private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let targetHost: String
         private let onCookiesReady: ([HTTPCookie]) -> Void
+        private let caCert: SecCertificate?
+        private let proxyRunning: Bool
         private(set) var didCallback = false
 
         init(targetURL: URL, onCookiesReady: @escaping ([HTTPCookie]) -> Void) {
             self.targetHost = targetURL.host?.lowercased() ?? ""
             self.onCookiesReady = onCookiesReady
+            if let data = WebViewDoHConfigurator.caCertificateData {
+                caCert = SecCertificateCreateWithData(nil, data as CFData)
+            } else {
+                caCert = nil
+            }
+            proxyRunning = WebViewDoHConfigurator.proxyRunning
         }
 
         func webView(
@@ -228,11 +237,25 @@ final class WebLoginViewController: BaseViewController {
             didReceive challenge: URLAuthenticationChallenge,
             completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
         ) {
-            if let credential = WebViewDoHConfigurator.credentialForLocalProxyChallenge(challenge) {
-                completionHandler(.useCredential, credential)
-            } else {
+            guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+                  let trust = challenge.protectionSpace.serverTrust
+            else {
                 completionHandler(.performDefaultHandling, nil)
+                return
             }
+            if let caCert, proxyRunning {
+                SecTrustSetAnchorCertificates(trust, [caCert] as CFArray)
+                SecTrustSetAnchorCertificatesOnly(trust, false)
+                var error: CFError?
+                if SecTrustEvaluateWithError(trust, &error) {
+                    #if DEBUG
+                    print("[WebViewDoHProxy] WebLogin accepted proxy CA for \(challenge.protectionSpace.host)")
+                    #endif
+                    completionHandler(.useCredential, URLCredential(trust: trust))
+                    return
+                }
+            }
+            completionHandler(.performDefaultHandling, nil)
         }
 
         /// Collect cookies and fire the callback. Only invoked from the "Done" button tap —
