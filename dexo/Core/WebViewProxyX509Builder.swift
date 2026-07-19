@@ -11,7 +11,6 @@ nonisolated enum WebViewProxyX509Builder {
 
     private static let commonNameOID = Data([0x06, 0x03, 0x55, 0x04, 0x03])
     private static let organizationNameOID = Data([0x06, 0x03, 0x55, 0x04, 0x0A])
-    private static let countryNameOID = Data([0x06, 0x03, 0x55, 0x04, 0x06])
     private static let ecdsaWithSHA256OID = Data([
         0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02,
     ])
@@ -29,42 +28,62 @@ nonisolated enum WebViewProxyX509Builder {
         0x06, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01,
     ])
 
-    static func makeTBSCertificate(host: String, publicKeyBytes: Data) throws -> Data {
-        guard !host.isEmpty,
-              host.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7F }),
-              publicKeyBytes.count == 65,
-              publicKeyBytes.first == 0x04
-        else {
-            if publicKeyBytes.count != 65 || publicKeyBytes.first != 0x04 {
-                throw BuilderError.invalidPublicKey
-            }
-            throw BuilderError.invalidHost
-        }
+    private static var certificateAuthorityName: Data {
+        distinguishedName([
+            (commonNameOID, "Dexo Local DoH CA"),
+            (organizationNameOID, "Dexo"),
+        ])
+    }
 
-        var serial = Data(count: 16)
-        let randomStatus = serial.withUnsafeMutableBytes { bytes in
-            SecRandomCopyBytes(kSecRandomDefault, bytes.count, bytes.baseAddress!)
-        }
-        guard randomStatus == errSecSuccess else {
-            throw BuilderError.randomGenerationFailed(randomStatus)
-        }
-        serial[serial.startIndex] &= 0x7F
-        if serial.allSatisfy({ $0 == 0 }) {
-            serial[serial.index(before: serial.endIndex)] = 1
-        }
+    static func makeCATBSCertificate(publicKeyBytes: Data) throws -> Data {
+        try validatePublicKey(publicKeyBytes)
 
         let now = Date()
         let notBefore = now.addingTimeInterval(-24 * 60 * 60)
-        let notAfter = now.addingTimeInterval(365 * 24 * 60 * 60)
+        let notAfter = now.addingTimeInterval(20 * 365 * 24 * 60 * 60)
+        let signatureAlgorithm = sequence([ecdsaWithSHA256OID])
+        let name = certificateAuthorityName
+        let subjectPublicKeyInfo = sequence([
+            sequence([ecPublicKeyOID, prime256v1OID]),
+            bitString(publicKeyBytes),
+        ])
+        let basicConstraints = extensionValue(
+            oid: basicConstraintsOID,
+            critical: true,
+            value: sequence([boolean(true)])
+        )
+        let keyUsage = extensionValue(
+            oid: keyUsageOID,
+            critical: true,
+            value: bitString(Data([0x06]), unusedBits: 1)
+        )
+        let extensions = explicit(tag: 3, sequence([basicConstraints, keyUsage]))
+
+        return sequence([
+            explicit(tag: 0, integer(Data([0x02]))),
+            integer(try randomSerial()),
+            signatureAlgorithm,
+            name,
+            sequence([asn1Time(notBefore), asn1Time(notAfter)]),
+            name,
+            subjectPublicKeyInfo,
+            extensions,
+        ])
+    }
+
+    static func makeTBSCertificate(host: String, publicKeyBytes: Data) throws -> Data {
+        try validatePublicKey(publicKeyBytes)
+        guard !host.isEmpty,
+              host.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7F })
+        else { throw BuilderError.invalidHost }
+
+        let now = Date()
+        let notBefore = now.addingTimeInterval(-24 * 60 * 60)
+        let notAfter = now.addingTimeInterval(7 * 24 * 60 * 60)
 
         let version = explicit(tag: 0, integer(Data([0x02])))
         let signatureAlgorithm = sequence([ecdsaWithSHA256OID])
-        let issuer = distinguishedName([
-            (commonNameOID, "DOH Proxy CA"),
-            (organizationNameOID, "DOH Proxy"),
-            (countryNameOID, "CN"),
-        ])
-        let validity = sequence([utcTime(notBefore), utcTime(notAfter)])
+        let validity = sequence([asn1Time(notBefore), asn1Time(notAfter)])
         let subject = distinguishedName([(commonNameOID, host)])
         let subjectPublicKeyInfo = sequence([
             sequence([ecPublicKeyOID, prime256v1OID]),
@@ -98,14 +117,35 @@ nonisolated enum WebViewProxyX509Builder {
 
         return sequence([
             version,
-            integer(serial),
+            integer(try randomSerial()),
             signatureAlgorithm,
-            issuer,
+            certificateAuthorityName,
             validity,
             subject,
             subjectPublicKeyInfo,
             extensions,
         ])
+    }
+
+    private static func validatePublicKey(_ publicKeyBytes: Data) throws {
+        guard publicKeyBytes.count == 65,
+              publicKeyBytes.first == 0x04
+        else { throw BuilderError.invalidPublicKey }
+    }
+
+    private static func randomSerial() throws -> Data {
+        var serial = Data(count: 16)
+        let status = serial.withUnsafeMutableBytes { bytes in
+            SecRandomCopyBytes(kSecRandomDefault, bytes.count, bytes.baseAddress!)
+        }
+        guard status == errSecSuccess else {
+            throw BuilderError.randomGenerationFailed(status)
+        }
+        serial[serial.startIndex] &= 0x7F
+        if serial.allSatisfy({ $0 == 0 }) {
+            serial[serial.index(before: serial.endIndex)] = 1
+        }
+        return serial
     }
 
     static func makeCertificate(tbsCertificate: Data, signature: Data) -> Data {
@@ -162,13 +202,22 @@ nonisolated enum WebViewProxyX509Builder {
         tagged(tag: 0x0C, content: Data(value.utf8))
     }
 
-    private static func utcTime(_ date: Date) -> Data {
+    private static func boolean(_ value: Bool) -> Data {
+        tagged(tag: 0x01, content: Data([value ? 0xFF : 0x00]))
+    }
+
+    private static func asn1Time(_ date: Date) -> Data {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyMMddHHmmss'Z'"
-        return tagged(tag: 0x17, content: Data(formatter.string(from: date).utf8))
+        let year = formatter.calendar.component(.year, from: date)
+        if year >= 1950, year < 2050 {
+            formatter.dateFormat = "yyMMddHHmmss'Z'"
+            return tagged(tag: 0x17, content: Data(formatter.string(from: date).utf8))
+        }
+        formatter.dateFormat = "yyyyMMddHHmmss'Z'"
+        return tagged(tag: 0x18, content: Data(formatter.string(from: date).utf8))
     }
 
     private static func bitString(_ bytes: Data, unusedBits: UInt8 = 0) -> Data {

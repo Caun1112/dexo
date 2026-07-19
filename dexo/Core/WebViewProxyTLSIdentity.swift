@@ -20,10 +20,14 @@ nonisolated final class WebViewProxyTLSIdentity: @unchecked Sendable {
 @available(iOS 17.0, *)
 nonisolated final class WebViewProxyCertificateAuthority: @unchecked Sendable {
     enum AuthorityError: Error {
-        case invalidArchive
-        case importFailed(OSStatus)
-        case missingIdentity
-        case missingPrivateKey(OSStatus)
+        case caPrivateKeyLookupFailed(OSStatus)
+        case caCertificateLookupFailed(OSStatus)
+        case caPrivateKeyGenerationFailed(CFError?)
+        case missingCAPublicKey
+        case caPublicKeyExportFailed(CFError?)
+        case caCertificateGenerationFailed(CFError?)
+        case invalidCACertificate
+        case caCertificateAddFailed(OSStatus)
         case leafPrivateKeyGenerationFailed(CFError?)
         case missingLeafPublicKey
         case publicKeyExportFailed(CFError?)
@@ -48,6 +52,12 @@ nonisolated final class WebViewProxyCertificateAuthority: @unchecked Sendable {
     private var identities: [String: WebViewProxyTLSIdentity] = [:]
     private var keychainMaterials: [KeychainMaterial] = []
 
+    private static let storageLock = NSLock()
+    private static let caKeyTag = Data(
+        "com.eilgnaw.dexo.webview-mitm.ca-key.v1".utf8
+    )
+    private static let caCertificateLabel = "Dexo Local DoH CA v1"
+
     private init(
         caPrivateKey: SecKey,
         certificate: SecCertificate
@@ -56,42 +66,194 @@ nonisolated final class WebViewProxyCertificateAuthority: @unchecked Sendable {
         self.certificate = certificate
     }
 
-    static func load() throws -> WebViewProxyCertificateAuthority {
-        guard let archive = Data(
-            base64Encoded: archiveBase64,
-            options: .ignoreUnknownCharacters
+    static func loadOrCreate() throws -> WebViewProxyCertificateAuthority {
+        storageLock.lock()
+        defer { storageLock.unlock() }
+
+        let storedPrivateKey = try loadCAPrivateKey()
+        let storedCertificate = try loadCACertificate()
+        if let storedPrivateKey,
+           let storedCertificate,
+           caCertificate(storedCertificate, matches: storedPrivateKey)
+        {
+            return WebViewProxyCertificateAuthority(
+                caPrivateKey: storedPrivateKey,
+                certificate: storedCertificate
+            )
+        }
+
+        // A partial or mismatched pair can be left behind if generation was
+        // interrupted. Replace it atomically from the app's point of view.
+        deleteStoredCA()
+        return try createAndStoreCA()
+    }
+
+    private static func loadCAPrivateKey() throws -> SecKey? {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(
+            [
+                kSecClass as String: kSecClassKey,
+                kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+                kSecAttrApplicationTag as String: caKeyTag,
+                kSecReturnRef as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+            ] as CFDictionary,
+            &result
+        )
+        if status == errSecItemNotFound {
+            return nil
+        }
+        guard status == errSecSuccess, let result else {
+            throw AuthorityError.caPrivateKeyLookupFailed(status)
+        }
+        return (result as! SecKey)
+    }
+
+    private static func loadCACertificate() throws -> SecCertificate? {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(
+            [
+                kSecClass as String: kSecClassCertificate,
+                kSecAttrLabel as String: caCertificateLabel,
+                kSecReturnRef as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+            ] as CFDictionary,
+            &result
+        )
+        if status == errSecItemNotFound {
+            return nil
+        }
+        guard status == errSecSuccess, let result else {
+            throw AuthorityError.caCertificateLookupFailed(status)
+        }
+        return (result as! SecCertificate)
+    }
+
+    private static func caCertificate(
+        _ certificate: SecCertificate,
+        matches privateKey: SecKey
+    ) -> Bool {
+        guard let expectedPublicKey = SecKeyCopyPublicKey(privateKey),
+              let certificatePublicKey = SecCertificateCopyKey(certificate)
+        else {
+            return false
+        }
+
+        var expectedError: Unmanaged<CFError>?
+        var certificateError: Unmanaged<CFError>?
+        guard let expectedBytes = SecKeyCopyExternalRepresentation(
+            expectedPublicKey,
+            &expectedError
+        ),
+            let certificateBytes = SecKeyCopyExternalRepresentation(
+                certificatePublicKey,
+                &certificateError
+            )
+        else {
+            return false
+        }
+        return expectedBytes as Data == certificateBytes as Data
+    }
+
+    private static func createAndStoreCA() throws -> WebViewProxyCertificateAuthority {
+        var shouldCleanUp = true
+        defer {
+            if shouldCleanUp {
+                deleteStoredCA()
+            }
+        }
+
+        var keyError: Unmanaged<CFError>?
+        var keyAttributes: [String: Any] = [
+            kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+            kSecAttrKeySizeInBits as String: 256,
+            kSecPrivateKeyAttrs as String: [
+                kSecAttrIsPermanent as String: true,
+                kSecAttrApplicationTag as String: caKeyTag,
+                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            ],
+        ]
+        #if !targetEnvironment(simulator)
+        // Device builds keep the signing key non-exportable in Secure Enclave.
+        // Simulators use the ordinary Keychain because no Secure Enclave exists.
+        keyAttributes[kSecAttrTokenID as String] = kSecAttrTokenIDSecureEnclave
+        #endif
+        guard let privateKey = SecKeyCreateRandomKey(
+            keyAttributes as CFDictionary,
+            &keyError
         ) else {
-            throw AuthorityError.invalidArchive
+            throw AuthorityError.caPrivateKeyGenerationFailed(
+                keyError?.takeRetainedValue()
+            )
+        }
+        guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
+            throw AuthorityError.missingCAPublicKey
+        }
+        var exportError: Unmanaged<CFError>?
+        guard let publicKeyData = SecKeyCopyExternalRepresentation(
+            publicKey,
+            &exportError
+        ) else {
+            throw AuthorityError.caPublicKeyExportFailed(
+                exportError?.takeRetainedValue()
+            )
         }
 
-        var importedItems: CFArray?
-        let options = [kSecImportExportPassphrase as String: archivePassword] as CFDictionary
-        let status = SecPKCS12Import(archive as CFData, options, &importedItems)
-        guard status == errSecSuccess else {
-            throw AuthorityError.importFailed(status)
+        let tbsCertificate = try WebViewProxyX509Builder.makeCATBSCertificate(
+            publicKeyBytes: publicKeyData as Data
+        )
+        var signatureError: Unmanaged<CFError>?
+        guard let signature = SecKeyCreateSignature(
+            privateKey,
+            .ecdsaSignatureMessageX962SHA256,
+            tbsCertificate as CFData,
+            &signatureError
+        ) else {
+            throw AuthorityError.caCertificateGenerationFailed(
+                signatureError?.takeRetainedValue()
+            )
         }
-        guard let items = importedItems as? [[String: Any]],
-              let first = items.first,
-              let identity = first[kSecImportItemIdentity as String] as! SecIdentity?
-        else {
-            throw AuthorityError.missingIdentity
+        let certificateData = WebViewProxyX509Builder.makeCertificate(
+            tbsCertificate: tbsCertificate,
+            signature: signature as Data
+        )
+        guard let certificate = SecCertificateCreateWithData(
+            nil,
+            certificateData as CFData
+        ) else {
+            throw AuthorityError.invalidCACertificate
         }
 
-        var certificate: SecCertificate?
-        guard SecIdentityCopyCertificate(identity, &certificate) == errSecSuccess,
-              let certificate
-        else {
-            throw AuthorityError.missingIdentity
+        let addStatus = SecItemAdd(
+            [
+                kSecValueRef as String: certificate,
+                kSecAttrLabel as String: caCertificateLabel,
+            ] as CFDictionary,
+            nil
+        )
+        guard addStatus == errSecSuccess else {
+            throw AuthorityError.caCertificateAddFailed(addStatus)
         }
 
-        var privateKey: SecKey?
-        let keyStatus = SecIdentityCopyPrivateKey(identity, &privateKey)
-        guard keyStatus == errSecSuccess, let privateKey else {
-            throw AuthorityError.missingPrivateKey(keyStatus)
-        }
+        shouldCleanUp = false
         return WebViewProxyCertificateAuthority(
             caPrivateKey: privateKey,
             certificate: certificate
+        )
+    }
+
+    private static func deleteStoredCA() {
+        SecItemDelete(
+            [
+                kSecClass as String: kSecClassCertificate,
+                kSecAttrLabel as String: caCertificateLabel,
+            ] as CFDictionary
+        )
+        SecItemDelete(
+            [
+                kSecClass as String: kSecClassKey,
+                kSecAttrApplicationTag as String: caKeyTag,
+            ] as CFDictionary
         )
     }
 
@@ -265,22 +427,4 @@ nonisolated final class WebViewProxyCertificateAuthority: @unchecked Sendable {
         )
     }
 
-    private static let archivePassword = "dexo-debug-mitm-ca-v1"
-
-    private static let archiveBase64 = """
-    MIIEyQIBAzCCBHcGCSqGSIb3DQEHAaCCBGgEggRkMIIEYDCCAtoGCSqGSIb3DQEHBqCCAsswggLHAgEAMIICwAYJKoZIhvcNAQcBMF8GCSqGSIb3DQEFDTBS
-    MDEGCSqGSIb3DQEFDDAkBBDyGnq6NrsnhYPX2lOinyugAgIIADAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQBKgQQgbiGHxe3Zt45vIN32twln4CCAlDM/Q1r
-    Rr/mdmJO7WVfdteSkvgwMQrEsRAsoqVU0KkOjwQR+dUqQBOzkyuLT3h3wQNDynwzXpX8V9tfNS0kYYDHtULkZgQiWKfOo5akQgSSso0VLvkVwMsGNy6s2491
-    mq3x+ztNDuq8sfBjKv58WiSJg1ZKvaBdrGE5w0sqMgrE1pqUbXZwfcVZDHuknL1bhMRj4c/LQmtW5bUzWw5g3ThXDQ7/Ft/WFlTwZaiqaEdyYF4UPj7z/J+H
-    6Oto4Z12qr6+FArn8VKg3UQeNqFLVwqMJy8Vzr2zWlKiLGUTz6q0KmaYu+/Nl8GDOwMaJYPIgm8FDHlQgYGP6eYBAB/yN1JYYXAi/5nx8l09bP6eG9FDGXzz
-    6L0jZ+OTkYXWZ8L0qKf2qsMlHKsteaMNHz4AlnAPtVVYooo3LGfvABv3beKotPndDx6f8O30HZx7EQuquqt1cBJ2n6fSUGofGRGU1E7yX+qLClESysKW8ufS
-    UzlQ+W7Kjg1yqCJnQK4Wgyao36xONUxoGBa47skhjRIdR5tqu7voZYSOnlejpF3BYEjUuaOTqrZQAoYycyt8HFsHA0Tgx9R/8weJzXxI2JcCa2TcMO/oNHPR
-    ZunoNPR5AEVah3U7b5e7AkmQ6wtXTHcaD3s2U+p24c/cYSKXKt3zEvPXCJ5HJgjmlrswKNj22D/E7NjHmT8lCrMfh4vOwtboHIYX3IgHuT3xdkf2QvSC6T0r
-    SouPTsdYFS3DTv1xI6EyCSGq93uadZgZJR18QbGOHZNAtK+z8iE64Q2mcELttpwZMIIBfgYJKoZIhvcNAQcBoIIBbwSCAWswggFnMIIBYwYLKoZIhvcNAQwK
-    AQKggfcwgfQwXwYJKoZIhvcNAQUNMFIwMQYJKoZIhvcNAQUMMCQEEPiz1r3qzf6eCpLtPPTwOGgCAggAMAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBCE
-    WjHeUolE2NnFL/hMTcERBIGQktk0M8tfjG/uq4kOS8X/CapDuxHeEYrRpXfekV/R02smmxz1EktkdnAudvPa6TaManO0N037J8EKZdaJnuwuwVhPhezd4RsY
-    z4DKpGJyeoGTXHmZuZwBf+Cz8jUadgD9XVCvD7+GOqj+PD9uHcKabsUCP4o+cgVNqTQ6SYllZn6zjls6TgK+i/HrVrRt/8imMVowIwYJKoZIhvcNAQkVMRYE
-    FF6ZrxYFUd47z13ja2HBwxPaNtiRMDMGCSqGSIb3DQEJFDEmHiQARABlAHgAbwAgAEQAZQBiAHUAZwAgAE0ASQBUAE0AIABDAEEwSTAxMA0GCWCGSAFlAwQC
-    AQUABCAGm/nZnbVe7Z/SKpfVOrCPidD8A4PwN/43kdFUEe29EAQQN66BHi/J/iN3mpnJVVcKwgICCAA=
-    """
 }

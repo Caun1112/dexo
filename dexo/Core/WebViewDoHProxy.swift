@@ -177,7 +177,7 @@ final class WebViewDoHProxy {
     }
 
     private func startListener() throws {
-        let certificateAuthority = try WebViewProxyCertificateAuthority.load()
+        let certificateAuthority = try WebViewProxyCertificateAuthority.loadOrCreate()
         self.certificateAuthority = certificateAuthority
 
         let tcpOptions = NWProtocolTCP.Options()
