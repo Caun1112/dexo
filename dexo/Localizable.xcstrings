@@ -4012,13 +4012,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DNS over HTTPS"
+            "value" : "DoH Settings"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DNS over HTTPS"
+            "value" : "DoH 配置"
           }
         }
       }
@@ -4400,13 +4400,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DNS over HTTPS"
+            "value" : "DoH Settings"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DNS over HTTPS"
+            "value" : "DoH 配置"
           }
         }
       }

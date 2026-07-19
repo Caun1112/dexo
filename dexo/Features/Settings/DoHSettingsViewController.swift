@@ -76,7 +76,10 @@ final class DoHSettingsViewController: ObservableViewController {
         guard settings.defaultDoHServerID != server.id else { return }
         settings.defaultDoHServerID = server.id
         applyResolverSettings()
-        tableView.reloadSections(IndexSet(integer: Section.servers.rawValue), with: .automatic)
+        tableView.reloadSections(
+            IndexSet([Section.overview.rawValue, Section.servers.rawValue]),
+            with: .automatic
+        )
     }
 
     @objc private func addServer() {

@@ -206,9 +206,6 @@ final class AppSettings {
 
     // MARK: - DNS over HTTPS
 
-    static let defaultDoHServerURL = "https://edge.47258.xyz/linuxdo"
-    private static let builtInDoHServerID = UUID(uuidString: "47258000-0000-4000-8000-000000000001")!
-
     struct DoHServer: Codable, Equatable, Identifiable, Sendable {
         let id: UUID
         var name: String
@@ -226,8 +223,7 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "dohEnabled") }
     }
 
-    /// All configured resolvers. The first read migrates the former single
-    /// `dohServerURL` value without changing the user's selected endpoint.
+    /// All resolvers explicitly configured by the user.
     var dohServers: [DoHServer] {
         get {
             if let data = defaults.data(forKey: "dohServers"),
@@ -235,16 +231,7 @@ final class AppSettings {
             {
                 return servers
             }
-
-            let legacyURL = defaults.string(forKey: "dohServerURL") ?? Self.defaultDoHServerURL
-            let server = DoHServer(
-                id: Self.builtInDoHServerID,
-                name: URL(string: legacyURL)?.host ?? "DoH",
-                urlString: legacyURL
-            )
-            persistDoHServers([server])
-            defaults.set(server.id.uuidString, forKey: "defaultDoHServerID")
-            return [server]
+            return []
         }
         set {
             persistDoHServers(newValue)
@@ -285,32 +272,6 @@ final class AppSettings {
         let servers = dohServers
         guard let id = defaultDoHServerID else { return servers.first }
         return servers.first { $0.id == id } ?? servers.first
-    }
-
-    /// Compatibility accessor used by the networking layer.
-    var dohServerURL: String {
-        get { defaultDoHServer?.urlString ?? Self.defaultDoHServerURL }
-        set {
-            var servers = dohServers
-            var newlySelectedID: UUID?
-            if let id = defaultDoHServerID,
-               let index = servers.firstIndex(where: { $0.id == id })
-            {
-                servers[index].urlString = newValue
-            } else {
-                let server = DoHServer(
-                    name: URL(string: newValue)?.host ?? "DoH",
-                    urlString: newValue
-                )
-                servers.append(server)
-                newlySelectedID = server.id
-            }
-            dohServers = servers
-            if let newlySelectedID {
-                defaultDoHServerID = newlySelectedID
-            }
-            defaults.set(newValue, forKey: "dohServerURL")
-        }
     }
 
     func saveDoHServer(_ server: DoHServer) {

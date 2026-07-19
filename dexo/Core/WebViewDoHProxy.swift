@@ -137,7 +137,8 @@ final class WebViewDoHProxy {
 
     func acquire() async throws -> Lease {
         guard AppSettings.shared.dohEnabled,
-              EncryptedDNSManager.normalizedServerURL(AppSettings.shared.dohServerURL) != nil
+              let serverURLString = AppSettings.shared.defaultDoHServer?.urlString,
+              EncryptedDNSManager.normalizedServerURL(serverURLString) != nil
         else {
             throw ProxyError.invalidDoHConfiguration
         }

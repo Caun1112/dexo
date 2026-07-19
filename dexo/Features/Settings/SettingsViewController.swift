@@ -255,12 +255,6 @@ extension SettingsViewController: UITableViewDataSource {
         } else {
             cell.detailTextLabel?.text = String(localized: "settings.doh.status.disabled")
         }
-        let icon = UIImageView(image: UIImage(systemName: settings.dohEnabled ? "shield.lefthalf.filled" : "shield"))
-        icon.tintColor = settings.dohEnabled ? themeManager.accentColor : .secondaryLabel
-        icon.contentMode = .scaleAspectFit
-        icon.frame = CGRect(x: 0, y: 0, width: 28, height: 28)
-        cell.imageView?.image = icon.image
-        cell.imageView?.tintColor = icon.tintColor
         cell.accessoryType = .disclosureIndicator
         return cell
     }

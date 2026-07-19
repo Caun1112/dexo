@@ -4,8 +4,8 @@ import XCTest
 final class EncryptedDNSManagerTests: XCTestCase {
     func testNormalizationAddsHTTPSScheme() {
         XCTAssertEqual(
-            EncryptedDNSManager.normalizedServerURL(" edge.47258.xyz/linuxdo ")?.absoluteString,
-            "https://edge.47258.xyz/linuxdo"
+            EncryptedDNSManager.normalizedServerURL(" dns.example.com/dns-query ")?.absoluteString,
+            "https://dns.example.com/dns-query"
         )
     }
 

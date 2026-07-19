@@ -1,24 +1,9 @@
 What to Test
 
-- In Settings, switch Topic Detail Rendering between Virtualized and Legacy. Confirm the selection takes effect the next time a topic is opened and both modes remain usable.
-- Open a very long topic in Virtualized mode and scroll rapidly in both directions. Confirm text, images, code, polls, details, tables, and other blocks appear without blank content, clipping, or visible height corrections while scrolling.
-- Jump to a distant post such as post 100, then pull down to load posts 80–99. Confirm the new posts are inserted above while post 100 stays at the same visible screen position.
-- In normal topic mode, verify the reply-reference indicator uses the original reply symbol and tapping the referenced username opens the replied-to post preview.
-- Switch a topic to nested mode and test sorting, deep reply lines, collapse/expand, loading more child replies, the floating reply button, rotation, and large text. Confirm connector lines remain continuous and item heights remain correct.
-- Verify multi-image browsing starts from the tapped image and supports paging and zoom transitions. Long-press a post header, body, or action area to open the raw post sheet and test Copy.
-- Verify reactions, likes, boosts, reply/more actions, separators, OP text color, topic tags, and theme changes match the Legacy renderer. Topic tags must be fully visible on their first appearance.
-- Open the Me tab several times and confirm cached profile information appears immediately without repeated loading states.
-- Pull to refresh the Me tab and confirm the latest profile data is fetched while the existing profile remains visible during refresh.
-- Verify the profile card, avatar, bio, join date, and four statistics display correctly in both light and dark themes.
-- Verify the circular message button appears beside the profile identity on both your profile and other profiles. Switch themes and use a large text size to confirm the layout does not overlap, then verify each button opens the inbox or composer as appropriate.
-- Open a topic with long text, switch the system between light and dark mode, and confirm all body text and code areas update their colors immediately.
-- Scroll through a topic before switching appearance and confirm the reading position is preserved and newly loaded posts use the current theme.
-- Switch the system appearance while a topic is loaded or loading more posts, and confirm the app does not crash and the reading position is preserved.
-- Try adding a Cloudflare-protected linux.do forum. Confirm the app shows a challenge prompt with an Open Challenge action.
-- Complete the challenge, return to Add Forum, and tap Add Forum again to verify the forum is added successfully.
-- Cancel the challenge or leave it incomplete and confirm the forum is not added.
-- Verify existing linux.do challenge prompts from forum features still open the same challenge page.
-- After passing the linux.do challenge, retry adding the forum and confirm the clearance cookies and browser session are reused without showing the challenge again.
-- Open a post whose thumbnail links to a full-resolution image. Confirm the image browser loads the linked original asset rather than the thumbnail.
-- Open a topic containing a table with small thumbnail images. Confirm thumbnails keep their declared size instead of stretching to the column width and remain sharp; images wider than the cell should shrink proportionally and still open in the image browser.
-- In the image browser, verify a single tap dismisses it, double-tapping only zooms, pinch zoom does not trigger dismissal, and paging still works.
+- Open Settings > Network > DoH Settings. Confirm the row has no icon and a fresh configuration contains no preset resolvers.
+- Try enabling DoH with an empty resolver list. Confirm the switch stays off and the app prompts you to add a resolver.
+- Add a resolver with a custom name and complete HTTPS endpoint. Confirm HTTP URLs, credentials, URL fragments, and malformed endpoints cannot be saved. If the scheme or name is omitted, confirm HTTPS and the endpoint host are used automatically.
+- Add a second resolver and make it the default by tapping its row or using the menu. Confirm the DEFAULT badge moves immediately and the status at the top shows the newly selected resolver. Return to the main Settings screen and confirm its subtitle also shows the current resolver.
+- Enable DoH and browse forum lists, topics, images, login pages, and Cloudflare challenge pages. Confirm normal app traffic continues to load; on iOS 17 or later, confirm in-app web pages also work while DoH is enabled.
+- Edit the active resolver and confirm subsequent requests use the updated endpoint. Delete the default resolver and confirm another resolver becomes the default. Delete the final resolver and confirm DoH turns off.
+- Repeat the main configuration flow in light and dark themes and with a larger app font size. Confirm labels, badges, menus, validation messages, and switches remain readable and correctly aligned.
