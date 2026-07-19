@@ -1,9 +1,4 @@
 What to Test
 
-- Open Settings > Network > DoH Settings. Confirm the row has no icon and a fresh configuration contains no preset resolvers.
-- Try enabling DoH with an empty resolver list. Confirm the switch stays off and the app prompts you to add a resolver.
-- Add a resolver with a custom name and complete HTTPS endpoint. Confirm HTTP URLs, credentials, URL fragments, and malformed endpoints cannot be saved. If the scheme or name is omitted, confirm HTTPS and the endpoint host are used automatically.
-- Add a second resolver and make it the default by tapping its row or using the menu. Confirm the DEFAULT badge moves immediately and the status at the top shows the newly selected resolver. Return to the main Settings screen and confirm its subtitle also shows the current resolver.
-- Enable DoH and browse forum lists, topics, images, login pages, and Cloudflare challenge pages. Confirm normal app traffic continues to load; on iOS 17 or later, confirm in-app web pages also work while DoH is enabled.
-- Edit the active resolver and confirm subsequent requests use the updated endpoint. Delete the default resolver and confirm another resolver becomes the default. Delete the final resolver and confirm DoH turns off.
-- Repeat the main configuration flow in light and dark themes and with a larger app font size. Confirm labels, badges, menus, validation messages, and switches remain readable and correctly aligned.
+- Enable DoH and open a login or verification page. Confirm it loads and works normally.
+- Exit and use DoH again. Confirm it continues to work.

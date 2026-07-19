@@ -70,7 +70,7 @@ let project = Project(
                     "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
                     "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "YES",
                     "CODE_SIGN_STYLE": "Automatic",
-                    "CURRENT_PROJECT_VERSION": "3",
+                    "CURRENT_PROJECT_VERSION": "2",
                     "GENERATE_INFOPLIST_FILE": "YES",
                     "INFOPLIST_KEY_CFBundleDisplayName": "Dexo",
                     "INFOPLIST_KEY_LSApplicationCategoryType": "public.app-category.utilities",
