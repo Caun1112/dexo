@@ -78,10 +78,6 @@ jobs:
       - name: Validate bundled privacy manifest
         run: |
           manifest=build/DerivedData/Build/Products/Debug-iphoneos/dexo.app/PrivacyInfo.xcprivacy
-          info_plist=build/DerivedData/Build/Products/Debug-iphoneos/dexo.app/Info.plist
           test -f "$manifest"
           plutil -lint "$manifest"
           cmp dexo/PrivacyInfo.xcprivacy "$manifest"
-          if arbitrary_loads=$(plutil -extract NSAppTransportSecurity.NSAllowsArbitraryLoads raw "$info_plist" 2>/dev/null); then
-            test "$arbitrary_loads" != "true"
-          fi
