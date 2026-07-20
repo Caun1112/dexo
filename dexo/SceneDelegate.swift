@@ -12,6 +12,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         ThemeManager.shared.apply(to: window)
         window.makeKeyAndVisible()
         self.window = window
+        PushDeepLinkCoordinator.shared.activate(window: window)
 
         #if DEBUG
         FPSOverlay.shared.install(on: windowScene)

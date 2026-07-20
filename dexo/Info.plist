@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>DexoAPNSEnvironment</key>
+	<string>$(DEXO_APNS_ENVIRONMENT)</string>
+	<key>DexoPushKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)com.eilgnaw.dexo.pushkeys</string>
+	<key>DexoPushRelayHost</key>
+	<string>$(DEXO_PUSH_RELAY_HOST)</string>
 	<key>CFBundleIcons</key>
 	<dict>
 		<key>CFBundlePrimaryIcon</key>

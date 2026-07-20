@@ -103,6 +103,24 @@ final class DatabaseManager: Sendable {
             )
         }
 
+        migrator.registerMigration("v4_push_subscriptions") { db in
+            try db.create(table: "pushSubscription") { t in
+                t.column("subscriptionID", .text).primaryKey()
+                t.column("forumId", .integer)
+                    .notNull()
+                    .references("forumInstance", onDelete: .cascade)
+                t.column("accountName", .text).notNull()
+                t.column("endpoint", .text).notNull()
+                t.column("previousEndpoint", .text)
+                t.column("expiresAt", .datetime).notNull()
+                t.column("apnsTokenFingerprint", .text).notNull()
+                t.column("state", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+                t.uniqueKey(["forumId", "accountName"])
+            }
+        }
+
         return migrator
     }
 
@@ -229,6 +247,35 @@ final class DatabaseManager: Sendable {
     func clearTopicTimingReports() throws {
         try dbPool.write { db in
             _ = try TopicTimingReport.deleteAll(db)
+        }
+    }
+
+    // MARK: - Push Subscriptions
+
+    func fetchPushSubscription(forumId: Int64, accountName: String) throws -> PushSubscriptionRecord? {
+        try dbPool.read { db in
+            try PushSubscriptionRecord
+                .filter(Column("forumId") == forumId)
+                .filter(Column("accountName") == accountName)
+                .fetchOne(db)
+        }
+    }
+
+    func fetchAllPushSubscriptions() throws -> [PushSubscriptionRecord] {
+        try dbPool.read { db in
+            try PushSubscriptionRecord.fetchAll(db)
+        }
+    }
+
+    func savePushSubscription(_ subscription: PushSubscriptionRecord) throws {
+        try dbPool.write { db in
+            try subscription.save(db)
+        }
+    }
+
+    func deletePushSubscription(subscriptionID: String) throws {
+        try dbPool.write { db in
+            _ = try PushSubscriptionRecord.deleteOne(db, key: subscriptionID)
         }
     }
 }

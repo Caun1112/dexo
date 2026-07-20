@@ -14,6 +14,8 @@ build/
 
 # Local config (contains DEVELOPMENT_TEAM etc.)
 .mise.local.toml
+server/push-relay/
+*.p8
 
 # XcodeBuildMCP local config (machine-specific simulator UUID)
 .xcodebuildmcp/

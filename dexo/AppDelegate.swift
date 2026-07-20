@@ -9,9 +9,12 @@ import Lightbox
 import SDWebImage
 import SDWebImageSVGCoder
 import UIKit
+import UserNotifications
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
+    private var shouldReconcilePushSubscriptions = false
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         if !EncryptedDNSManager.shared.applyCurrentSettings() {
             AppSettings.shared.dohEnabled = false
@@ -51,6 +54,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // ImageBrowserController draws its own dot-style page indicator.
         LightboxConfig.PageIndicator.enabled = false
 
+        UNUserNotificationCenter.current().delegate = self
+        if (try? DatabaseManager.shared.fetchAllPushSubscriptions().isEmpty) == false {
+            shouldReconcilePushSubscriptions = true
+            application.registerForRemoteNotifications()
+        }
+
         return true
     }
 
@@ -66,5 +75,43 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Called when the user discards a scene session.
         // If any sessions were discarded while the application was not running, this will be called shortly after application:didFinishLaunchingWithOptions.
         // Use this method to release any resources that were specific to the discarded scenes, as they will not return.
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        APNSTokenProvider.shared.didRegister(deviceToken: deviceToken)
+        if shouldReconcilePushSubscriptions {
+            shouldReconcilePushSubscriptions = false
+            Task {
+                await PushSubscriptionReconciler.reconcileAll()
+            }
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        APNSTokenProvider.shared.didFailToRegister(error: error)
+    }
+}
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .badge, .sound]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        PushDeepLinkCoordinator.shared.receive(
+            userInfo: response.notification.request.content.userInfo
+        )
     }
 }

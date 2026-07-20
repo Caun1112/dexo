@@ -1,0 +1,4 @@
+[env]
+TUIST_DEVELOPMENT_TEAM = "YOUR_TEAM_ID"
+# Host only: no scheme, path, query, or trailing slash.
+TUIST_PUSH_RELAY_HOST = "push.example.com"

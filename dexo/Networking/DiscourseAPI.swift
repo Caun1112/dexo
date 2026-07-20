@@ -388,6 +388,35 @@ final class DiscourseAPI {
         try await request(route: .siteInfo)
     }
 
+    func fetchPushSiteSettings() async throws -> DiscoursePushSiteSettings {
+        try await request(route: .siteSettings)
+    }
+
+    func subscribePush(endpoint: String, p256dh: String, auth: String) async throws {
+        let _: EmptyDiscourseResponse = try await request(
+            route: .subscribePush,
+            parameters: [
+                "subscription": [
+                    "endpoint": endpoint,
+                    "keys": ["p256dh": p256dh, "auth": auth],
+                ],
+                "send_confirmation": false,
+            ]
+        )
+    }
+
+    func unsubscribePush(endpoint: String, p256dh: String, auth: String) async throws {
+        let _: EmptyDiscourseResponse = try await request(
+            route: .unsubscribePush,
+            parameters: [
+                "subscription": [
+                    "endpoint": endpoint,
+                    "keys": ["p256dh": p256dh, "auth": auth],
+                ],
+            ]
+        )
+    }
+
     func fetchBasicInfo(includeStoredWebCookies: Bool = false) async throws -> DiscourseBasicInfo {
         let route = DiscourseRouter.basicInfo
         var headers = HTTPHeaders()

@@ -1,0 +1,18 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "push.encrypted_fallback.body" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Dexo to view this notification." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开 Dexo 查看此通知。" } }
+      }
+    },
+    "push.encrypted_fallback.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "New forum notification" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新的论坛通知" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

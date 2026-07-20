@@ -1,6 +1,7 @@
 import ProjectDescription
 
 let developmentTeam = Environment.developmentTeam.getString(default: "")
+let pushRelayHost = Environment.pushRelayHost.getString(default: "")
 
 let project = Project(
     name: "dexo",
@@ -10,6 +11,7 @@ let project = Project(
     ),
     packages: [
         .local(path: "Packages/CookedHTML"),
+        .local(path: "Packages/PushCrypto"),
     ],
     settings: .settings(
         base: [
@@ -53,6 +55,7 @@ let project = Project(
                 .glob(pattern: "dexo/Core/aliases.json"),
                 .glob(pattern: "dexo/PrivacyInfo.xcprivacy"),
             ]),
+            entitlements: .file(path: "dexo/dexo.entitlements"),
             dependencies: [
                 .external(name: "Alamofire"),
                 .external(name: "GRDB"),
@@ -60,6 +63,8 @@ let project = Project(
                 .external(name: "SDWebImageSVGCoder"),
                 .external(name: "Lightbox"),
                 .package(product: "CookedHTML"),
+                .package(product: "PushCrypto"),
+                .target(name: "DexoNotificationService"),
                 .external(name: "DanmakuKit"),
                 .external(name: "Perception"),
             ],
@@ -71,6 +76,7 @@ let project = Project(
                     "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "YES",
                     "CODE_SIGN_STYLE": "Automatic",
                     "CURRENT_PROJECT_VERSION": "2",
+                    "DEXO_PUSH_RELAY_HOST": .string(pushRelayHost),
                     "GENERATE_INFOPLIST_FILE": "YES",
                     "INFOPLIST_KEY_CFBundleDisplayName": "Dexo",
                     "INFOPLIST_KEY_LSApplicationCategoryType": "public.app-category.utilities",
@@ -86,6 +92,44 @@ let project = Project(
                     "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
                     "SWIFT_EMIT_LOC_STRINGS": "YES",
                     "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
+                    "SWIFT_VERSION": "5.0",
+                    "TARGETED_DEVICE_FAMILY": "1,2",
+                ],
+                configurations: [
+                    .debug(name: "Debug", settings: ["DEXO_APNS_ENVIRONMENT": "development"]),
+                    .release(name: "Release", settings: ["DEXO_APNS_ENVIRONMENT": "production"]),
+                ]
+            )
+        ),
+        .target(
+            name: "DexoNotificationService",
+            destinations: .iOS,
+            product: .appExtension,
+            bundleId: "com.eilgnaw.dexo.NotificationService",
+            deploymentTargets: .iOS("16.0"),
+            infoPlist: .extendingDefault(with: [
+                "DexoPushKeychainAccessGroup": "$(AppIdentifierPrefix)com.eilgnaw.dexo.pushkeys",
+                "NSExtension": [
+                    "NSExtensionPointIdentifier": "com.apple.usernotifications.service",
+                    "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).NotificationService",
+                ],
+            ]),
+            sources: ["DexoNotificationService/**"],
+            resources: ["DexoNotificationService/Localizable.xcstrings"],
+            entitlements: .file(path: "DexoNotificationService/DexoNotificationService.entitlements"),
+            dependencies: [
+                .package(product: "PushCrypto"),
+            ],
+            settings: .settings(
+                base: [
+                    "APPLICATION_EXTENSION_API_ONLY": "YES",
+                    "CODE_SIGN_STYLE": "Automatic",
+                    "CURRENT_PROJECT_VERSION": "2",
+                    "GENERATE_INFOPLIST_FILE": "YES",
+                    "MARKETING_VERSION": "1.0",
+                    "PRODUCT_NAME": "DexoNotificationService",
+                    "SKIP_INSTALL": "YES",
+                    "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated",
                     "SWIFT_VERSION": "5.0",
                     "TARGETED_DEVICE_FAMILY": "1,2",
                 ]

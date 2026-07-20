@@ -1,6 +1,102 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "push.encrypted_fallback.body" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Dexo to view this notification." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开 Dexo 查看此通知。" } }
+      }
+    },
+    "push.encrypted_fallback.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "New forum notification" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新的论坛通知" } }
+      }
+    },
+    "push.error.apns_timeout" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Timed out while registering this device with Apple Push Notification service." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "向 Apple 推送通知服务注册设备时超时。" } }
+      }
+    },
+    "push.error.forum_unsupported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This forum does not support Web Push notifications." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "该论坛不支持 Web Push 通知。" } }
+      }
+    },
+    "push.error.invalid_forum_key" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The forum returned an invalid push encryption key." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "论坛返回了无效的推送加密密钥。" } }
+      }
+    },
+    "push.error.local_record" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The local push subscription could not be read securely." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法安全读取本地推送订阅。" } }
+      }
+    },
+    "push.error.missing_identity" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Log in to this forum before enabling push notifications." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先登录该论坛，再开启推送通知。" } }
+      }
+    },
+    "push.error.not_configured" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Push relay is not configured for this build." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前构建未配置推送中继。" } }
+      }
+    },
+    "push.error.permission_denied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Notification permission is disabled. You can enable it in iOS Settings." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "通知权限已关闭，可前往 iOS 设置中开启。" } }
+      }
+    },
+    "push.error.relay_rejected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The push relay rejected the subscription request." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "推送中继拒绝了订阅请求。" } }
+      }
+    },
+    "push.error.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Push Notifications" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "推送通知" } }
+      }
+    },
+    "push.settings.enable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable Notifications" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启通知" } }
+      }
+    },
+    "push.settings.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Notifications are encrypted by the forum and decrypted only on this device. The relay does not store your APNs token or notification content." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "通知由论坛加密，仅在本机解密。中继不会保存你的 APNs token 或通知内容。" } }
+      }
+    },
+    "push.settings.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Push Notifications" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "推送通知" } }
+      }
+    },
+    "push.logout_cleanup.message %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dexo could not remove the forum push subscription, so you remain signed in to prevent orphaned notifications. %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Dexo 无法移除论坛推送订阅。为防止退出后仍收到通知，本次未退出登录。%@" } }
+      }
+    },
+    "push.logout_cleanup.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could Not Sign Out" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法退出登录" } }
+      }
+    },
     "action.cancel" : {
       "localizations" : {
         "en" : {

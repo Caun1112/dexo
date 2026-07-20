@@ -45,6 +45,7 @@ enum DiscourseRouter {
     case categoryTopics(slug: String, id: Int, feedMode: TopicFeedMode?, page: Int)
     case tagTopics(name: String, page: Int)
     case siteInfo
+    case siteSettings
     case basicInfo
     case currentUser
     case emojis
@@ -70,10 +71,12 @@ enum DiscourseRouter {
     case followUser(username: String)
     case unfollowUser(username: String)
     case messageBusPoll(clientId: String)
+    case subscribePush
+    case unsubscribePush
 
     var method: HTTPMethod {
         switch self {
-        case .createTopic, .createBookmark, .createBoost, .uploadImage, .topicTimings, .messageBusPoll, .likePost, .createPrivateMessage, .flagPost:
+        case .createTopic, .createBookmark, .createBoost, .uploadImage, .topicTimings, .messageBusPoll, .likePost, .createPrivateMessage, .flagPost, .subscribePush, .unsubscribePush:
             return .post
         case .toggleReaction, .votePoll, .markNotificationRead, .followUser:
             return .put
@@ -166,6 +169,8 @@ enum DiscourseRouter {
             return "/tag/\(name).json?page=\(page)"
         case .siteInfo:
             return "/site.json"
+        case .siteSettings:
+            return "/site/settings.json"
         case .basicInfo:
             return "/site/basic-info.json"
         case .currentUser:
@@ -224,6 +229,10 @@ enum DiscourseRouter {
             return "/u/\(username)/follow"
         case .messageBusPoll(let clientId):
             return "/message-bus/\(clientId)/poll"
+        case .subscribePush:
+            return "/push_notifications/subscribe.json"
+        case .unsubscribePush:
+            return "/push_notifications/unsubscribe.json"
         }
     }
 }

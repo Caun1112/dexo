@@ -25,6 +25,46 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         notificationPoller = nil
     }
 
+    func openPushNotification(relativeURL: String) {
+        guard let destination = URL(string: relativeURL, relativeTo: URL(string: api.baseURL))?.absoluteURL,
+              destination.scheme?.lowercased() == "https",
+              destination.host?.lowercased() == URL(string: api.baseURL)?.host?.lowercased(),
+              let route = Self.topicRoute(from: destination) else { return }
+        guard let tabBar = children.first as? ForumTabBarController,
+              let navigationController = tabBar.navigationControllers.first else { return }
+        if #available(iOS 18.0, *) {
+            tabBar.selectedTab = tabBar.tabs.first
+        } else {
+            tabBar.selectedIndex = 0
+        }
+        let viewController = TopicDetailControllerFactory.make(
+            api: api,
+            topicId: route.topicID,
+            initialFloor: route.floor
+        )
+        navigationController.popToRootViewController(animated: false)
+        navigationController.pushViewController(viewController, animated: true)
+    }
+
+    private static func topicRoute(from url: URL) -> (topicID: Int, floor: Int?)? {
+        let components = url.pathComponents.filter { $0 != "/" }
+        guard let topicIndex = components.firstIndex(of: "t") else { return nil }
+        let tail = components.dropFirst(topicIndex + 1)
+        guard !tail.isEmpty else { return nil }
+        if let topicID = Int(tail[tail.startIndex]) {
+            let floorIndex = tail.index(after: tail.startIndex)
+            let floor = floorIndex < tail.endIndex ? Int(tail[floorIndex]) : nil
+            return (topicID, floor)
+        }
+        let topicIDIndex = tail.index(after: tail.startIndex)
+        guard topicIDIndex < tail.endIndex, let topicID = Int(tail[topicIDIndex]) else {
+            return nil
+        }
+        let floorIndex = tail.index(after: topicIDIndex)
+        let floor = floorIndex < tail.endIndex ? Int(tail[floorIndex]) : nil
+        return (topicID, floor)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -72,7 +112,7 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         withPerceptionTracking {
             _ = self.authManager.isAuthenticated(for: self.forum.baseURL)
             _ = self.authManager.username(for: self.forum.baseURL)
-        } onChange: {
+        } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.startObservingAuth()
@@ -110,7 +150,7 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         guard let poller = notificationPoller else { return }
         withPerceptionTracking {
             _ = poller.hasAnyUnread
-        } onChange: {
+        } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, let tabBarVC = self.children.first as? ForumTabBarController else { return }
                 // Red dot: empty string shows dot without number
@@ -261,6 +301,33 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
     }
 
     func performLogout() {
+        if let username = authManager.username(for: forum.baseURL) {
+            let coordinator = PushSubscriptionCoordinator(api: api)
+            if coordinator.hasSubscription(username: username) {
+                Task {
+                    do {
+                        try await coordinator.disable(username: username)
+                        self.finishLogout()
+                    } catch {
+                        let alert = UIAlertController(
+                            title: String(localized: "push.logout_cleanup.title"),
+                            message: String(localized: "push.logout_cleanup.message \(error.localizedDescription)"),
+                            preferredStyle: .alert
+                        )
+                        alert.addAction(UIAlertAction(
+                            title: String(localized: "action.ok"),
+                            style: .default
+                        ))
+                        self.present(alert, animated: true)
+                    }
+                }
+                return
+            }
+        }
+        finishLogout()
+    }
+
+    private func finishLogout() {
         authManager.logout(forum: forum)
         // Refresh forum from DB
         if let forums = try? DatabaseManager.shared.fetchAllForums(),

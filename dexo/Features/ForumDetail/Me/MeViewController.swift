@@ -223,9 +223,29 @@ final class MeViewController: ObservableViewController {
         )
         alert.addAction(UIAlertAction(title: String(localized: "me.logout"), style: .destructive) { [weak self] _ in
             guard let self else { return }
-            self.authGate?.performLogout()
-            self.viewModel.clearCachedProfile()
-            self.viewModel.requiresLogin = true
+            Task {
+                do {
+                    if let username = self.viewModel.currentUser?.username {
+                        try await PushSubscriptionCoordinator(api: self.api).disable(
+                            username: username
+                        )
+                    }
+                    self.authGate?.performLogout()
+                    self.viewModel.clearCachedProfile()
+                    self.viewModel.requiresLogin = true
+                } catch {
+                    let errorAlert = UIAlertController(
+                        title: String(localized: "push.logout_cleanup.title"),
+                        message: String(localized: "push.logout_cleanup.message \(error.localizedDescription)"),
+                        preferredStyle: .alert
+                    )
+                    errorAlert.addAction(UIAlertAction(
+                        title: String(localized: "action.ok"),
+                        style: .default
+                    ))
+                    self.present(errorAlert, animated: true)
+                }
+            }
         })
         alert.addAction(UIAlertAction(title: String(localized: "cancel"), style: .cancel))
         present(alert, animated: true)
@@ -260,7 +280,7 @@ extension MeViewController: UITableViewDataSource {
         case 0:
             let isLoggedIn = authGate?.isAuthenticated() ?? false
             guard isLoggedIn else { return 0 }
-            return showChallengeRow ? 4 : 3
+            return showChallengeRow ? 5 : 4
         case 1:
             return 1
         default:
@@ -291,6 +311,9 @@ extension MeViewController: UITableViewDataSource {
                 content.image = UIImage(systemName: "checkmark.circle")
                 content.text = String(localized: "me.read")
             case 3:
+                content.image = UIImage(systemName: "bell.badge")
+                content.text = String(localized: "push.settings.title")
+            case 4:
                 content.image = UIImage(systemName: "shield")
                 content.text = String(localized: "me.challenge")
             default:
@@ -351,6 +374,13 @@ extension MeViewController: UITableViewDelegate {
                 let vc = ReadTopicsViewController(api: api)
                 navigationController?.pushViewController(vc, animated: true)
             case 3:
+                guard let username = viewModel.currentUser?.username else { return }
+                let viewController = PushNotificationSettingsViewController(
+                    api: api,
+                    username: username
+                )
+                navigationController?.pushViewController(viewController, animated: true)
+            case 4:
                 presentChallenge()
             default:
                 break

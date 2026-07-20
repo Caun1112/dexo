@@ -1,6 +1,6 @@
 # Dexo 无状态 Web Push → APNs 端到端加密实施方案
 
-> 状态：待实施
+> 状态：本地实现完成；等待配置中继域名、APNs Provider Key，并在 Apple Developer 中为 App ID 启用 Push Notifications 后进行端到端验收
 > 编写日期：2026-07-20
 > 目标实施位置：`/Users/wxl/Documents/dexo`
 > 服务端语言：Go
