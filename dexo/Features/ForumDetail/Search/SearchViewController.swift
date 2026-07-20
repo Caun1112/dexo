@@ -3,6 +3,7 @@ import UIKit
 final class SearchViewController: ObservableViewController, UISearchBarDelegate {
     private let api: DiscourseAPI
     private let viewModel: SearchViewModel
+    private var locallyReadTopicIDs: Set<Int> = []
 
     private var searchTask: Task<Void, Never>?
 
@@ -79,7 +80,12 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
             return UITableViewCell()
         }
         let topicTitle = self.viewModel.topicsById[post.topicId]?.title
-        cell.configure(with: post, topicTitle: topicTitle, assetBaseURL: self.api.assetBaseURL)
+        cell.configure(
+            with: post,
+            topicTitle: topicTitle,
+            assetBaseURL: self.api.assetBaseURL,
+            isLocallyRead: self.locallyReadTopicIDs.contains(post.topicId)
+        )
         return cell
     }
 
@@ -146,12 +152,21 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        reloadLocalReadState()
         // The shared API cache is invalidated on an auth change. Reloading on
         // entry ensures a previously opened Search tab does not keep the old
         // anonymous category list.
         Task {
             await viewModel.loadCategories()
         }
+    }
+
+    private func reloadLocalReadState() {
+        let ids = ReadHistoryScope.current(api: api)
+            .flatMap { try? LocalReadHistoryStore.shared.topicIDs(scope: $0) } ?? []
+        guard ids != locallyReadTopicIDs else { return }
+        locallyReadTopicIDs = ids
+        tableView.reloadData()
     }
 
     // MARK: - Filter Bar Setup

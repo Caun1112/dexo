@@ -3,6 +3,7 @@ import UIKit
 final class UserPostsViewController: ObservableViewController {
     private let api: DiscourseAPI
     private let viewModel: UserPostsViewModel
+    private var locallyReadTopicIDs: Set<Int> = []
 
     private lazy var tableView: UITableView = {
         let tv = ThemedTableView(frame: .zero, style: .plain)
@@ -79,6 +80,13 @@ final class UserPostsViewController: ObservableViewController {
         }
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        locallyReadTopicIDs = ReadHistoryScope.current(api: api)
+            .flatMap { try? LocalReadHistoryStore.shared.topicIDs(scope: $0) } ?? []
+        tableView.reloadData()
+    }
+
     override func updateUI() {
         if viewModel.isLoading, viewModel.searchResults.isEmpty {
             activityIndicator.startAnimating()
@@ -109,7 +117,12 @@ extension UserPostsViewController: UITableViewDataSource {
         }
         let post = viewModel.searchResults[indexPath.row]
         let topicTitle = viewModel.topicsById[post.topicId]?.title
-        cell.configure(with: post, topicTitle: topicTitle, assetBaseURL: api.assetBaseURL)
+        cell.configure(
+            with: post,
+            topicTitle: topicTitle,
+            assetBaseURL: api.assetBaseURL,
+            isLocallyRead: locallyReadTopicIDs.contains(post.topicId)
+        )
         cell.accessoryType = .disclosureIndicator
         return cell
     }

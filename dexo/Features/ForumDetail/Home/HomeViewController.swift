@@ -4,6 +4,7 @@ final class HomeViewController: ObservableViewController {
     private let api: DiscourseAPI
     private let viewModel: HomeViewModel
     private weak var authGate: AuthGating?
+    private var locallyReadTopicIDs: Set<Int> = []
 
     private lazy var sortBarButton: UIBarButtonItem = {
         let item = UIBarButtonItem(
@@ -80,7 +81,8 @@ final class HomeViewController: ObservableViewController {
             avatarURL: avatarURL,
             categoryName: category?.name,
             categoryColor: categoryColor,
-            timestampKind: self.viewModel.feedMode.timestampKind
+            timestampKind: self.viewModel.feedMode.timestampKind,
+            isLocallyRead: self.locallyReadTopicIDs.contains(topic.id)
         )
         return cell
     }
@@ -259,6 +261,23 @@ final class HomeViewController: ObservableViewController {
         }
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        reloadLocalReadState()
+    }
+
+    private func reloadLocalReadState() {
+        let ids: Set<Int>
+        if let scope = ReadHistoryScope.current(api: api) {
+            ids = (try? LocalReadHistoryStore.shared.topicIDs(scope: scope)) ?? []
+        } else {
+            ids = []
+        }
+        guard ids != locallyReadTopicIDs else { return }
+        locallyReadTopicIDs = ids
+        updateUI()
+    }
+
     override func updateUI() {
         // Login-required state
         if viewModel.requiresLogin {
@@ -298,7 +317,8 @@ final class HomeViewController: ObservableViewController {
                 pinnedItems.append(PinnedTopicBar.Item(
                     topicId: topic.id,
                     title: topic.fancyTitle,
-                    iconColor: color
+                    iconColor: color,
+                    isLocallyRead: locallyReadTopicIDs.contains(topic.id)
                 ))
             } else {
                 regularIds.append(topic.id)

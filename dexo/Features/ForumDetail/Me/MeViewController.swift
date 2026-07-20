@@ -110,6 +110,10 @@ final class MeViewController: ObservableViewController {
         let currentUser = viewModel.currentUser
         let userProfile = viewModel.userProfile
         let summary = viewModel.summary
+        // The notification badge is rendered by the table view data source.
+        // Read it directly in the tracking scope so clearing the poller state
+        // reliably invalidates this screen even when reloadData() defers cells.
+        _ = notificationPoller?.hasUnreadNotifications
 
         // Show skeleton on first load, hide once data arrives
         if !hasLoaded, isLoading, currentUser == nil {
@@ -336,6 +340,7 @@ extension MeViewController: UITableViewDelegate {
             switch indexPath.row {
             case 0:
                 notificationPoller?.clearNotifications()
+                tableView.reloadRows(at: [indexPath], with: .none)
                 let vc = NotificationsViewController(api: api, authGate: authGate)
                 navigationController?.pushViewController(vc, animated: true)
             case 1:

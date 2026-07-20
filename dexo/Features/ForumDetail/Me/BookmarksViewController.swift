@@ -3,6 +3,7 @@ import UIKit
 final class BookmarksViewController: ObservableViewController {
     private let api: DiscourseAPI
     private let viewModel: BookmarksViewModel
+    private var locallyReadTopicIDs: Set<Int> = []
 
     private lazy var tableView: UITableView = {
         let tv = ThemedTableView(frame: .zero, style: .plain)
@@ -80,6 +81,13 @@ final class BookmarksViewController: ObservableViewController {
         }
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        locallyReadTopicIDs = ReadHistoryScope.current(api: api)
+            .flatMap { try? LocalReadHistoryStore.shared.topicIDs(scope: $0) } ?? []
+        tableView.reloadData()
+    }
+
     override func updateUI() {
         if viewModel.isLoading {
             activityIndicator.startAnimating()
@@ -116,7 +124,11 @@ extension BookmarksViewController: UITableViewDataSource {
             return UITableViewCell()
         }
         let bookmark = viewModel.bookmarks[indexPath.row]
-        cell.configure(with: bookmark, assetBaseURL: api.assetBaseURL)
+        cell.configure(
+            with: bookmark,
+            assetBaseURL: api.assetBaseURL,
+            isLocallyRead: bookmark.topicId.map(locallyReadTopicIDs.contains) ?? false
+        )
         cell.accessoryType = .disclosureIndicator
         return cell
     }

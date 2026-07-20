@@ -6,7 +6,15 @@ import Perception
 final class AppSettings {
     static let shared = AppSettings()
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+
+    private init() {
+        defaults = .standard
+    }
+
+    init(testingDefaults defaults: UserDefaults) {
+        self.defaults = defaults
+    }
 
     // MARK: - Appearance
 
@@ -202,6 +210,30 @@ final class AppSettings {
     var boostDisplayMode: BoostDisplayMode {
         get { BoostDisplayMode(rawValue: defaults.integer(forKey: "boostDisplayMode")) ?? .danmaku }
         set { defaults.set(newValue.rawValue, forKey: "boostDisplayMode") }
+    }
+
+    // MARK: - Read Tracking
+
+    /// linux.do timing uploads are deliberately opt-in. `bool(forKey:)`
+    /// defaults to false, preserving the app's historical behavior.
+    var linuxDoReadTimingsEnabled: Bool {
+        get { defaults.bool(forKey: "linuxDoReadTimingsEnabled") }
+        set {
+            let wasEnabled = defaults.bool(forKey: "linuxDoReadTimingsEnabled")
+            defaults.set(newValue, forKey: "linuxDoReadTimingsEnabled")
+            if newValue, !wasEnabled {
+                defaults.set(
+                    linuxDoReadTimingsActivationGeneration + 1,
+                    forKey: "linuxDoReadTimingsActivationGeneration"
+                )
+            }
+        }
+    }
+
+    /// Changes whenever the user manually moves the linux.do switch from off
+    /// to on, allowing already-created API instances to reset their breaker.
+    var linuxDoReadTimingsActivationGeneration: Int {
+        defaults.integer(forKey: "linuxDoReadTimingsActivationGeneration")
     }
 
     // MARK: - DNS over HTTPS

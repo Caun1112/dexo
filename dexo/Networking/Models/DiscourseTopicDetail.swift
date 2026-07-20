@@ -15,9 +15,10 @@ struct DiscourseTopicDetail: Decodable {
     /// `nil` for anonymous fetches. Used by the jump-to-floor sheet to offer a
     /// "first unread" shortcut.
     let lastReadPostNumber: Int?
+    let archetype: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, tags
+        case id, title, tags, archetype
         case fancyTitle = "fancy_title"
         case postsCount = "posts_count"
         case replyCount = "reply_count"
@@ -41,6 +42,7 @@ struct DiscourseTopicDetail: Decodable {
         postStream = try container.decode(PostStream.self, forKey: .postStream)
         validReactions = (try? container.decodeIfPresent([String].self, forKey: .validReactions)) ?? []
         lastReadPostNumber = try? container.decodeIfPresent(Int.self, forKey: .lastReadPostNumber)
+        archetype = try? container.decodeIfPresent(String.self, forKey: .archetype)
     }
 
     /// Memberwise initializer used to synthesize a `DiscourseTopicDetail` from
@@ -58,7 +60,8 @@ struct DiscourseTopicDetail: Decodable {
         tags: [Tag],
         postStream: PostStream,
         validReactions: [String],
-        lastReadPostNumber: Int?
+        lastReadPostNumber: Int?,
+        archetype: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -71,6 +74,7 @@ struct DiscourseTopicDetail: Decodable {
         self.postStream = postStream
         self.validReactions = validReactions
         self.lastReadPostNumber = lastReadPostNumber
+        self.archetype = archetype
     }
 
     struct PostStream: Decodable {
@@ -409,9 +413,10 @@ struct DiscourseNestedTopicResponse: Decodable {
         let categoryId: Int?
         let createdAt: String?
         let tags: [DiscourseTopicDetail.Tag]
+        let archetype: String?
 
         enum CodingKeys: String, CodingKey {
-            case id, title, slug, tags
+            case id, title, slug, tags, archetype
             case fancyTitle = "fancy_title"
             case postsCount = "posts_count"
             case replyCount = "reply_count"
@@ -430,6 +435,7 @@ struct DiscourseNestedTopicResponse: Decodable {
             categoryId = try? container.decodeIfPresent(Int.self, forKey: .categoryId)
             createdAt = try? container.decodeIfPresent(String.self, forKey: .createdAt)
             tags = (try? container.decodeIfPresent([DiscourseTopicDetail.Tag].self, forKey: .tags)) ?? []
+            archetype = try? container.decodeIfPresent(String.self, forKey: .archetype)
         }
     }
 }

@@ -84,7 +84,12 @@ final class SearchResultCell: UITableViewCell {
         ])
     }
 
-    func configure(with post: DiscourseSearchResult.SearchPost, topicTitle: String?, assetBaseURL: String) {
+    func configure(
+        with post: DiscourseSearchResult.SearchPost,
+        topicTitle: String?,
+        assetBaseURL: String,
+        isLocallyRead: Bool = false
+    ) {
         let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
         avatarWidthConstraint.constant = avatarSize
         avatarHeightConstraint.constant = avatarSize
@@ -94,12 +99,13 @@ final class SearchResultCell: UITableViewCell {
         if let topicTitle, !topicTitle.isEmpty {
             titleLabel.attributedText = nil
             titleLabel.text = topicTitle
+            titleLabel.textColor = isLocallyRead ? .secondaryLabel : .label
         } else if let headline = post.topicTitleHeadline {
             titleLabel.attributedText = Self.highlightedString(
                 html: headline,
                 baseFont: FontManager.shared.font(size: 16, weight: .medium),
                 highlightFont: FontManager.shared.font(size: 16, weight: .bold),
-                baseColor: .label
+                baseColor: isLocallyRead ? .secondaryLabel : .label
             )
         } else {
             titleLabel.attributedText = nil
@@ -115,7 +121,7 @@ final class SearchResultCell: UITableViewCell {
                 html: post.blurb!,
                 baseFont: FontManager.shared.font(size: 14),
                 highlightFont: FontManager.shared.font(size: 14, weight: .semibold),
-                baseColor: .secondaryLabel
+                baseColor: isLocallyRead ? .tertiaryLabel : .secondaryLabel
             )
             blurbLabel.isHidden = false
             bottomToUsername.isActive = false
@@ -133,6 +139,7 @@ final class SearchResultCell: UITableViewCell {
         } else {
             avatarImageView.image = nil
         }
+        avatarImageView.alpha = isLocallyRead ? 0.7 : 1
     }
 
     override func prepareForReuse() {
@@ -143,6 +150,8 @@ final class SearchResultCell: UITableViewCell {
         usernameLabel.text = nil
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
+        avatarImageView.alpha = 1
+        titleLabel.textColor = .label
     }
 
     // MARK: - Search Highlight Parsing

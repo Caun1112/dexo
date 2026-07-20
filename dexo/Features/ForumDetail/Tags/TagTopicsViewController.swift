@@ -96,6 +96,7 @@ final class TagTopicsViewController: ObservableViewController {
     private let api: DiscourseAPI
     private let tagName: String
     private let viewModel: TagTopicsViewModel
+    private var locallyReadTopicIDs: Set<Int> = []
 
     private lazy var tableView: UITableView = {
         let tv = ThemedTableView(frame: .zero, style: .plain)
@@ -127,7 +128,8 @@ final class TagTopicsViewController: ObservableViewController {
             with: topic,
             avatarURL: avatarURL,
             categoryName: category?.name,
-            categoryColor: categoryColor
+            categoryColor: categoryColor,
+            isLocallyRead: self.locallyReadTopicIDs.contains(topic.id)
         )
         return cell
     }
@@ -186,6 +188,19 @@ final class TagTopicsViewController: ObservableViewController {
         Task {
             await viewModel.loadTopics()
         }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        reloadLocalReadState()
+    }
+
+    private func reloadLocalReadState() {
+        let ids = ReadHistoryScope.current(api: api)
+            .flatMap { try? LocalReadHistoryStore.shared.topicIDs(scope: $0) } ?? []
+        guard ids != locallyReadTopicIDs else { return }
+        locallyReadTopicIDs = ids
+        updateUI()
     }
 
     override func updateUI() {

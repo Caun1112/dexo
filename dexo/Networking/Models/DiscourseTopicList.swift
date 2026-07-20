@@ -83,6 +83,7 @@ struct DiscourseTopicList: Decodable {
         let createdAt: String
         let lastPostedAt: String?
         let bumpedAt: String?
+        let lastVisitedAt: String?
         let pinned: Bool?
         let unseen: Bool?
         let excerpt: String?
@@ -98,7 +99,44 @@ struct DiscourseTopicList: Decodable {
             case createdAt = "created_at"
             case lastPostedAt = "last_posted_at"
             case bumpedAt = "bumped_at"
+            case lastVisitedAt = "last_visited_at"
             case tags
+        }
+
+        init(
+            id: Int,
+            fancyTitle: String,
+            title: String,
+            postsCount: Int,
+            replyCount: Int,
+            views: Int,
+            categoryId: Int?,
+            createdAt: String,
+            lastPostedAt: String?,
+            bumpedAt: String?,
+            lastVisitedAt: String?,
+            pinned: Bool?,
+            unseen: Bool?,
+            excerpt: String?,
+            posters: [Poster]?,
+            tags: [TopicListTag]
+        ) {
+            self.id = id
+            self.fancyTitle = fancyTitle
+            self.title = title
+            self.postsCount = postsCount
+            self.replyCount = replyCount
+            self.views = views
+            self.categoryId = categoryId
+            self.createdAt = createdAt
+            self.lastPostedAt = lastPostedAt
+            self.bumpedAt = bumpedAt
+            self.lastVisitedAt = lastVisitedAt
+            self.pinned = pinned
+            self.unseen = unseen
+            self.excerpt = excerpt
+            self.posters = posters
+            self.tags = tags
         }
 
         init(from decoder: Decoder) throws {
@@ -113,6 +151,7 @@ struct DiscourseTopicList: Decodable {
             createdAt = try container.decode(String.self, forKey: .createdAt)
             lastPostedAt = try container.decodeIfPresent(String.self, forKey: .lastPostedAt)
             bumpedAt = try container.decodeIfPresent(String.self, forKey: .bumpedAt)
+            lastVisitedAt = try container.decodeIfPresent(String.self, forKey: .lastVisitedAt)
             pinned = try container.decodeIfPresent(Bool.self, forKey: .pinned)
             unseen = try container.decodeIfPresent(Bool.self, forKey: .unseen)
             excerpt = try container.decodeIfPresent(String.self, forKey: .excerpt)

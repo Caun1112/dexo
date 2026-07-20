@@ -108,6 +108,25 @@ final class TopicCell: UITableViewCell {
         return label
     }()
 
+    private let originStack: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 3
+        return stack
+    }()
+
+    private lazy var trailingStack: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [originStack, timeLabel])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setContentHuggingPriority(.required, for: .horizontal)
+        stack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return stack
+    }()
+
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         setupUI()
@@ -123,7 +142,7 @@ final class TopicCell: UITableViewCell {
         contentView.addSubview(titleLabel)
         contentView.addSubview(replyCountLabel)
         contentView.addSubview(metadataStack)
-        contentView.addSubview(timeLabel)
+        contentView.addSubview(trailingStack)
         metadataStack.addArrangedSubview(categoryLabel)
         metadataStack.addArrangedSubview(tagStack)
 
@@ -152,9 +171,9 @@ final class TopicCell: UITableViewCell {
             metadataStack.heightAnchor.constraint(greaterThanOrEqualToConstant: 18),
             metadataStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
 
-            timeLabel.centerYAnchor.constraint(equalTo: metadataStack.centerYAnchor),
-            timeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            timeLabel.leadingAnchor.constraint(greaterThanOrEqualTo: metadataStack.trailingAnchor, constant: 8),
+            trailingStack.centerYAnchor.constraint(equalTo: metadataStack.centerYAnchor),
+            trailingStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            trailingStack.leadingAnchor.constraint(greaterThanOrEqualTo: metadataStack.trailingAnchor, constant: 8),
         ])
     }
 
@@ -164,6 +183,9 @@ final class TopicCell: UITableViewCell {
         categoryName: String?,
         categoryColor: UIColor?,
         timestampKind: TopicTimestampKind = .activity,
+        timestampOverride: Date? = nil,
+        isLocallyRead: Bool = false,
+        origins: ReadTopicOrigin = [],
     ) {
         let titleFont = FontManager.shared.font(size: 16, weight: .medium)
         let replyFont = FontManager.shared.font(size: 16, weight: .bold)
@@ -183,11 +205,14 @@ final class TopicCell: UITableViewCell {
         avatarImageView.layer.cornerRadius = avatarSize / 2
 
         Self.applyEmojiTitle(topic.fancyTitle, to: titleLabel)
+        titleLabel.textColor = isLocallyRead ? .secondaryLabel : .label
+        avatarImageView.alpha = isLocallyRead ? 0.7 : 1
 
         // Reply count with gray→orange color
         let replies = max(topic.postsCount - 1, 0)
         replyCountLabel.text = "\(replies)"
         replyCountLabel.textColor = Self.replyCountColor(replies)
+        replyCountLabel.alpha = isLocallyRead ? 0.7 : 1
 
         // Category and topic tags share a compact metadata line. Tags are
         // visual badges only; the cell remains the single tap target.
@@ -218,7 +243,9 @@ final class TopicCell: UITableViewCell {
         tagStack.isHidden = tagStack.arrangedSubviews.isEmpty
 
         // Time
-        timeLabel.text = Self.formatDate(timestampKind.dateString(for: topic))
+        timeLabel.text = timestampOverride.map(Self.formatDate)
+            ?? Self.formatDate(timestampKind.dateString(for: topic))
+        configureOrigins(origins)
 
         // Avatar
         if let url = avatarURL {
@@ -239,7 +266,10 @@ final class TopicCell: UITableViewCell {
                 return String(localized: "topic.cell.a11y.created \(time)")
             }
         }
-        let parts = [topic.title, metadataModel.categoryName, tagsText, repliesText, timeText]
+        let originText: String? = origins.isEmpty
+            ? nil
+            : String(localized: "read.origin.a11y \(Self.originAccessibilityText(origins))")
+        let parts = [topic.title, metadataModel.categoryName, tagsText, repliesText, timeText, originText]
             .compactMap { (s: String?) -> String? in
                 guard let s, !s.isEmpty else { return nil }
                 return s
@@ -260,8 +290,15 @@ final class TopicCell: UITableViewCell {
         }
         tagStack.isHidden = false
         timeLabel.text = nil
+        originStack.arrangedSubviews.forEach { view in
+            originStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
+        avatarImageView.alpha = 1
+        replyCountLabel.alpha = 1
+        titleLabel.textColor = .label
     }
 
     // MARK: - Emoji title
@@ -393,6 +430,50 @@ final class TopicCell: UITableViewCell {
             return String(localized: "time.just_now")
         }
         return relativeFormatter.localizedString(for: date, relativeTo: now)
+    }
+
+    private static func formatDate(_ date: Date) -> String {
+        let now = Date()
+        if abs(date.timeIntervalSince(now)) < 5 {
+            return String(localized: "time.just_now")
+        }
+        return relativeFormatter.localizedString(for: date, relativeTo: now)
+    }
+
+    private func configureOrigins(_ origins: ReadTopicOrigin) {
+        originStack.arrangedSubviews.forEach { view in
+            originStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        if origins.contains(.local) {
+            originStack.addArrangedSubview(Self.makeOriginIcon(
+                systemName: "iphone",
+                label: String(localized: "read.origin.local")
+            ))
+        }
+        if origins.contains(.cloud) {
+            originStack.addArrangedSubview(Self.makeOriginIcon(
+                systemName: "icloud",
+                label: String(localized: "read.origin.cloud")
+            ))
+        }
+        originStack.isHidden = originStack.arrangedSubviews.isEmpty
+    }
+
+    private static func makeOriginIcon(systemName: String, label: String) -> UIImageView {
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let view = UIImageView(image: UIImage(systemName: systemName, withConfiguration: config))
+        view.tintColor = .secondaryLabel
+        view.isAccessibilityElement = true
+        view.accessibilityLabel = label
+        return view
+    }
+
+    private static func originAccessibilityText(_ origins: ReadTopicOrigin) -> String {
+        var names: [String] = []
+        if origins.contains(.local) { names.append(String(localized: "read.origin.local")) }
+        if origins.contains(.cloud) { names.append(String(localized: "read.origin.cloud")) }
+        return names.joined(separator: ", ")
     }
 }
 

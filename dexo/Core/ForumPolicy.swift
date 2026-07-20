@@ -6,8 +6,9 @@ enum ForumPolicy {
     /// Hosts where the like affordance should be suppressed in post cells.
     private static let likeButtonSuppressedHosts: Set<String> = []
 
-    /// Hosts that don't want client-side read-tracking POSTs to `/topics/timings`.
-    private static let readTimingsSuppressedHosts: Set<String> = ["linux.do"]
+    /// Hosts where read timing uploads are opt-in because repeated POSTs may
+    /// trigger site-side anti-bot protection.
+    private static let readTimingsOptInHosts: Set<String> = ["linux.do"]
 
     /// True when posts on this forum should hide the heart / like button.
     static func hidesLikeButton(baseURL: String) -> Bool {
@@ -16,7 +17,14 @@ enum ForumPolicy {
 
     /// True when this forum opts out of `/topics/timings` reporting.
     static func tracksReadTimings(baseURL: String) -> Bool {
-        !matches(baseURL: baseURL, suppressed: readTimingsSuppressedHosts)
+        guard matches(baseURL: baseURL, suppressed: readTimingsOptInHosts) else {
+            return true
+        }
+        return AppSettings.shared.linuxDoReadTimingsEnabled
+    }
+
+    static func isLinuxDoFamily(baseURL: String) -> Bool {
+        matches(baseURL: baseURL, suppressed: readTimingsOptInHosts)
     }
 
     /// Host check that also matches subdomains (e.g. `meta.linux.do` for `linux.do`).

@@ -74,9 +74,23 @@ final class TopicDetailViewModel {
     /// from deep in the topic, an earlier `loadEarlierPosts` would prepend
     /// floors from the prior window in front of the OP.
     private var loadGeneration: UInt = 0
+    private var recordedLocalReadTopicId: Int?
 
     init(api: DiscourseAPI) {
         self.api = api
+    }
+
+    private func recordLocalReadIfNeeded(_ detail: DiscourseTopicDetail) {
+        guard detail.archetype != "private_message",
+              recordedLocalReadTopicId != detail.id,
+              let scope = ReadHistoryScope.current(api: api)
+        else { return }
+        do {
+            try LocalReadHistoryStore.shared.record(topic: detail, scope: scope)
+            recordedLocalReadTopicId = detail.id
+        } catch {
+            debugLog("[LocalRead] failed to record topic \(detail.id): \(error)")
+        }
     }
 
     var posts: [DiscourseTopicDetail.Post] {
@@ -353,6 +367,7 @@ final class TopicDetailViewModel {
     ) async {
         isTreeMode = false
         topic = detail
+        recordLocalReadIfNeeded(detail)
         allPostIds = detail.postStream.stream ?? detail.postStream.posts.map(\.id)
         loadedPostIds = Set(detail.postStream.posts.map(\.id))
         if detail.postStream.posts.first?.postNumber == 1 {
@@ -651,9 +666,11 @@ final class TopicDetailViewModel {
                     stream: nil
                 ),
                 validReactions: topic?.validReactions ?? [],
-                lastReadPostNumber: nil
+                lastReadPostNumber: nil,
+                archetype: topicMeta.archetype
             )
             topic = synthetic
+            recordLocalReadIfNeeded(synthetic)
 
             // Treat the nested response as "the whole window" — no flat-mode
             // pagination state applies.
@@ -864,6 +881,7 @@ final class TopicDetailViewModel {
             let detail = try await api.fetchTopic(id: id, nearPostNumber: nearPostNumber, filter: filter)
             guard loadGeneration == expectedGeneration else { return }
             topic = detail
+            recordLocalReadIfNeeded(detail)
 
             // Save the full stream of post IDs
             allPostIds = detail.postStream.stream ?? detail.postStream.posts.map(\.id)

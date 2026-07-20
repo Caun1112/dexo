@@ -81,13 +81,14 @@ final class BookmarkCell: UITableViewCell {
         ])
     }
 
-    func configure(with bookmark: DiscourseBookmark, assetBaseURL: String) {
+    func configure(with bookmark: DiscourseBookmark, assetBaseURL: String, isLocallyRead: Bool = false) {
         let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
         avatarWidthConstraint.constant = avatarSize
         avatarHeightConstraint.constant = avatarSize
         avatarImageView.layer.cornerRadius = avatarSize / 2
 
         titleLabel.text = bookmark.title ?? bookmark.name
+        titleLabel.textColor = isLocallyRead ? .secondaryLabel : .label
         excerptLabel.text = bookmark.excerpt?.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         if let createdAt = bookmark.createdAt {
             timeLabel.text = Self.formatDate(createdAt)
@@ -102,6 +103,7 @@ final class BookmarkCell: UITableViewCell {
         } else {
             avatarImageView.image = nil
         }
+        avatarImageView.alpha = isLocallyRead ? 0.7 : 1
     }
 
     override func prepareForReuse() {
@@ -111,6 +113,8 @@ final class BookmarkCell: UITableViewCell {
         timeLabel.text = nil
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
+        avatarImageView.alpha = 1
+        titleLabel.textColor = .label
     }
 
     private static func formatDate(_ isoString: String) -> String {

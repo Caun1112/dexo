@@ -75,6 +75,8 @@ final class SettingsViewController: ObservableViewController {
         case renderPreview
         case webViewProxyTest
         case urlSessionProxyTest
+        case linuxDoReadTimings
+        case timingReports
     }
     #endif
 }
@@ -113,8 +115,16 @@ extension SettingsViewController: UITableViewDataSource {
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        guard visibleSections[section] == .network else { return nil }
-        return String(localized: "settings.doh.root.footer")
+        switch visibleSections[section] {
+        case .network:
+            return String(localized: "settings.doh.root.footer")
+        #if DEBUG
+        case .debug:
+            return String(localized: "settings.read_timings.footer")
+        #endif
+        default:
+            return nil
+        }
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -151,6 +161,10 @@ extension SettingsViewController: UITableViewDataSource {
         #if DEBUG
         case .debug:
             switch DebugRow(rawValue: indexPath.row)! {
+            case .linuxDoReadTimings:
+                return makeLinuxDoReadTimingsCell(tableView, indexPath: indexPath)
+            case .timingReports:
+                return makeTimingReportsCell(tableView, indexPath: indexPath)
             case .renderPreview:
                 return makeRenderPreviewCell(tableView, indexPath: indexPath)
             case .webViewProxyTest:
@@ -259,6 +273,28 @@ extension SettingsViewController: UITableViewDataSource {
         return cell
     }
 
+    private func makeLinuxDoReadTimingsCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        applyFonts(to: cell)
+        cell.textLabel?.text = String(localized: "settings.read_timings.linux_do")
+        cell.selectionStyle = .none
+        let toggle = UISwitch()
+        toggle.isOn = settings.linuxDoReadTimingsEnabled
+        toggle.addTarget(self, action: #selector(linuxDoReadTimingsChanged(_:)), for: .valueChanged)
+        cell.accessoryView = toggle
+        return cell
+    }
+
+    private func makeTimingReportsCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        applyFonts(to: cell)
+        cell.textLabel?.text = String(localized: "settings.read_timings.reports")
+        cell.imageView?.image = UIImage(systemName: "list.bullet.rectangle")
+        cell.imageView?.tintColor = ThemeManager.shared.accentColor
+        cell.accessoryType = .disclosureIndicator
+        return cell
+    }
+
     private func makeStorageCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
         applyFonts(to: cell)
@@ -347,6 +383,10 @@ extension SettingsViewController: UITableViewDelegate {
         #if DEBUG
         case .debug:
             switch DebugRow(rawValue: indexPath.row)! {
+            case .linuxDoReadTimings:
+                break
+            case .timingReports:
+                navigationController?.pushViewController(TopicTimingReportsViewController(), animated: true)
             case .renderPreview:
                 showRenderPreviewInput()
             case .webViewProxyTest:
@@ -366,6 +406,10 @@ extension SettingsViewController: UITableViewDelegate {
 extension SettingsViewController {
     @objc private func autoOpenToggleChanged(_ sender: UISwitch) {
         settings.autoOpenLastForum = sender.isOn
+    }
+
+    @objc private func linuxDoReadTimingsChanged(_ sender: UISwitch) {
+        settings.linuxDoReadTimingsEnabled = sender.isOn
     }
 
     private func reloadAppearanceSection() {

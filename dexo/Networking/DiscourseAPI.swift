@@ -1,6 +1,71 @@
 import Alamofire
 import Foundation
 
+struct TopicTimingResponseAssessment: Equatable {
+    let outcome: TopicTimingOutcome
+    let statusCode: Int?
+    let errorSummary: String?
+}
+
+struct TopicTimingCircuitBreaker {
+    static let maximumFailures = 3
+
+    private(set) var failureCount = 0
+    var isTripped: Bool { failureCount >= Self.maximumFailures }
+
+    mutating func record(_ outcome: TopicTimingOutcome) -> Bool {
+        if outcome == .success {
+            failureCount = 0
+        } else {
+            failureCount += 1
+        }
+        return isTripped
+    }
+
+    mutating func reset() {
+        failureCount = 0
+    }
+}
+
+func assessTopicTimingResponse(
+    statusCode: Int?,
+    data: Data?,
+    errorDescription: String?
+) -> TopicTimingResponseAssessment {
+    if isCloudflareChallengeResponse(data) {
+        return TopicTimingResponseAssessment(
+            outcome: .cloudflareChallenge,
+            statusCode: statusCode,
+            errorSummary: "Cloudflare challenge required"
+        )
+    }
+    if let statusCode, (200 ..< 300).contains(statusCode) {
+        return TopicTimingResponseAssessment(
+            outcome: .success,
+            statusCode: statusCode,
+            errorSummary: nil
+        )
+    }
+    let summary: String
+    if let errorDescription {
+        summary = String(
+            errorDescription
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+                .prefix(300)
+        )
+    } else if let statusCode {
+        summary = "HTTP \(statusCode)"
+    } else {
+        summary = "Network request failed"
+    }
+    return TopicTimingResponseAssessment(
+        outcome: .failure,
+        statusCode: statusCode,
+        errorSummary: summary
+    )
+}
+
 /// Normalizes both shapes returned by Discourse's category list endpoint:
 /// nested `subcategory_list` responses and lazy-load responses where roots and
 /// a small child preview are mixed in one flat array. Root order always follows
@@ -134,6 +199,7 @@ final class DiscourseAPI {
 
     let baseURL: String
     let assetBaseURL: String
+    let forumID: Int64?
     private(set) var emojiReady: Bool = false
     private let interceptor: DiscourseAuthInterceptor
     private var cachedCategoryList: DiscourseCategoryList?
@@ -151,6 +217,7 @@ final class DiscourseAPI {
     init(forum: ForumInstance) {
         self.baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.assetBaseURL = forum.assetBaseURL
+        self.forumID = forum.id
         self.interceptor = DiscourseAuthInterceptor(baseURL: baseURL)
         self.categoryPageLoader = nil
         self.categoryChildrenLoader = nil
@@ -160,6 +227,7 @@ final class DiscourseAPI {
     init(baseURL: String) {
         self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.assetBaseURL = self.baseURL
+        self.forumID = nil
         self.interceptor = DiscourseAuthInterceptor(baseURL: self.baseURL)
         self.categoryPageLoader = nil
         self.categoryChildrenLoader = nil
@@ -175,6 +243,7 @@ final class DiscourseAPI {
     ) {
         self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.assetBaseURL = self.baseURL
+        self.forumID = nil
         self.interceptor = DiscourseAuthInterceptor(baseURL: self.baseURL)
         self.categoryPageLoader = categoryPageLoader
         self.categoryChildrenLoader = categoryChildrenLoader
@@ -658,13 +727,26 @@ final class DiscourseAPI {
     ///   - topicTime: total time spent on the topic in milliseconds
     ///   - timings: per-post duration map (postNumber → milliseconds visible)
     func postTopicTimings(topicId: Int, topicTime: Int, timings: [Int: Int]) async throws {
-        // Per-forum opt-out (e.g., linux.do) — drop the request entirely.
-        guard ForumPolicy.tracksReadTimings(baseURL: baseURL) else { return }
+        if ForumPolicy.isLinuxDoFamily(baseURL: baseURL) {
+            let generation = AppSettings.shared.linuxDoReadTimingsActivationGeneration
+            if lastTopicTimingsActivationGeneration != generation {
+                topicTimingsCircuitBreaker.reset()
+                lastTopicTimingsActivationGeneration = generation
+            }
+        }
+        let reportingEnabled = ForumPolicy.tracksReadTimings(baseURL: baseURL)
+        if reportingEnabled, lastTopicTimingsReportingEnabled == false {
+            // Manual re-enable after an automatic linux.do shutdown starts a
+            // fresh circuit-breaker window on existing API instances.
+            topicTimingsCircuitBreaker.reset()
+        }
+        lastTopicTimingsReportingEnabled = reportingEnabled
+        guard reportingEnabled else { return }
         // Circuit breaker: a forum where timings reliably fail (anonymous, read-only,
         // server-side disabled, …) keeps failing every visit. Stop the bleeding after
         // a few consecutive misses for the rest of this app session.
-        if topicTimingsFailureCount >= Self.maxTopicTimingsFailures {
-            debugLog("[DiscourseAPI] timings: skipped (circuit-breaker tripped, \(topicTimingsFailureCount) failures)")
+        if topicTimingsCircuitBreaker.isTripped {
+            debugLog("[DiscourseAPI] timings: skipped (circuit-breaker tripped, \(topicTimingsCircuitBreaker.failureCount) failures)")
             return
         }
         guard !timings.isEmpty else { return }
@@ -677,22 +759,101 @@ final class DiscourseAPI {
             "timings": stringKeyed,
         ]
         debugLog("[DiscourseAPI] POST /topics/timings topic=\(topicId) topic_time=\(topicTime) posts=\(timings.count)")
+        let attemptedAt = Date()
+        let requestStart = Date()
         let response = await session.request(url, method: route.method, parameters: parameters, encoding: URLEncoding.default)
             .serializingData().response
-        let status = response.response?.statusCode ?? 0
-        if (200 ..< 300).contains(status) {
-            topicTimingsFailureCount = 0
-            debugLog("[DiscourseAPI] timings: ok (\(status))")
+        let requestDuration = Int(Date().timeIntervalSince(requestStart) * 1000)
+        let assessment = assessTopicTimingResponse(
+            statusCode: response.response?.statusCode,
+            data: response.data,
+            errorDescription: response.error?.localizedDescription
+        )
+        if assessment.outcome == .success {
+            _ = topicTimingsCircuitBreaker.record(.success)
+            debugLog("[DiscourseAPI] timings: ok (\(assessment.statusCode ?? 0))")
+            persistTopicTimingReport(
+                topicId: topicId,
+                topicTime: topicTime,
+                timings: timings,
+                attemptedAt: attemptedAt,
+                requestDuration: requestDuration,
+                statusCode: assessment.statusCode,
+                outcome: .success,
+                consecutiveFailureCount: 0,
+                trippedBreaker: false,
+                errorSummary: nil
+            )
         } else {
-            topicTimingsFailureCount += 1
-            let body = response.data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-            debugLog("[DiscourseAPI] timings: FAILED status=\(status) body=\(body) (consec=\(topicTimingsFailureCount))")
-            throw DiscourseAPIError(messages: ["Failed to post topic timings"], errorType: nil)
+            let trippedBreaker = topicTimingsCircuitBreaker.record(assessment.outcome)
+            let summary = assessment.errorSummary ?? "Network request failed"
+            debugLog("[DiscourseAPI] timings: FAILED status=\(assessment.statusCode ?? 0) (consec=\(topicTimingsCircuitBreaker.failureCount))")
+            persistTopicTimingReport(
+                topicId: topicId,
+                topicTime: topicTime,
+                timings: timings,
+                attemptedAt: attemptedAt,
+                requestDuration: requestDuration,
+                statusCode: assessment.statusCode,
+                outcome: assessment.outcome,
+                consecutiveFailureCount: topicTimingsCircuitBreaker.failureCount,
+                trippedBreaker: trippedBreaker,
+                errorSummary: summary
+            )
+            if trippedBreaker, ForumPolicy.isLinuxDoFamily(baseURL: baseURL) {
+                AppSettings.shared.linuxDoReadTimingsEnabled = false
+                lastTopicTimingsReportingEnabled = false
+                NotificationCenter.default.post(
+                    name: .linuxDoReadTimingsAutoDisabled,
+                    object: self
+                )
+            }
+            throw DiscourseAPIError(
+                messages: [summary],
+                errorType: assessment.outcome == .cloudflareChallenge ? "challenge_required" : nil
+            )
         }
     }
 
-    private var topicTimingsFailureCount: Int = 0
-    private static let maxTopicTimingsFailures = 3
+    private var topicTimingsCircuitBreaker = TopicTimingCircuitBreaker()
+    private var lastTopicTimingsReportingEnabled: Bool?
+    private var lastTopicTimingsActivationGeneration: Int?
+
+    private func persistTopicTimingReport(
+        topicId: Int,
+        topicTime: Int,
+        timings: [Int: Int],
+        attemptedAt: Date,
+        requestDuration: Int,
+        statusCode: Int?,
+        outcome: TopicTimingOutcome,
+        consecutiveFailureCount: Int,
+        trippedBreaker: Bool,
+        errorSummary: String?
+    ) {
+        guard let forumID else { return }
+        var report = TopicTimingReport(
+            forumId: forumID,
+            baseURL: baseURL,
+            accountName: AuthManager.shared.username(for: baseURL),
+            topicId: topicId,
+            attemptedAt: attemptedAt,
+            topicTime: topicTime,
+            postCount: timings.count,
+            visibleTime: timings.values.reduce(0, +),
+            requestDuration: requestDuration,
+            statusCode: statusCode,
+            outcome: outcome,
+            consecutiveFailureCount: consecutiveFailureCount,
+            trippedBreaker: trippedBreaker,
+            errorSummary: errorSummary
+        )
+        do {
+            try DatabaseManager.shared.saveTopicTimingReport(&report)
+        } catch {
+            debugLog("[DiscourseAPI] timings: failed to persist report: \(error)")
+        }
+    }
 
     /// Fetch the shared_session_key from the main site HTML meta tag.
     func fetchSharedSessionKey() async -> String? {
@@ -883,6 +1044,12 @@ final class DiscourseAPI {
 
         return try response.result.get()
     }
+}
+
+extension Notification.Name {
+    static let linuxDoReadTimingsAutoDisabled = Notification.Name(
+        "linuxDoReadTimingsAutoDisabled"
+    )
 }
 
 // MARK: - Error Handling

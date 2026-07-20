@@ -8,6 +8,7 @@ final class PinnedTopicBar: UIView {
         let topicId: Int
         let title: String
         let iconColor: UIColor?
+        let isLocallyRead: Bool
     }
 
     static let height: CGFloat = 50
@@ -165,6 +166,8 @@ final class PinnedTopicBar: UIView {
     @objc private func handleThemeDidChange() {
         applyTheme()
         if let item = currentItem {
+            titleLabel.textColor = item.isLocallyRead ? .secondaryLabel : .label
+            pinIcon.alpha = item.isLocallyRead ? 0.7 : 1
             applyIcon(for: item)
         }
         indicator.configure(totalCount: items.count, currentIndex: currentIndex, animated: false)
@@ -183,10 +186,13 @@ final class PinnedTopicBar: UIView {
         guard let item = currentItem else {
             titleLabel.text = nil
             pinIcon.image = nil
+            pinIcon.alpha = 1
             return
         }
         let body: () -> Void = { [self] in
             TopicCell.applyEmojiTitle(item.title, to: titleLabel)
+            titleLabel.textColor = item.isLocallyRead ? .secondaryLabel : .label
+            pinIcon.alpha = item.isLocallyRead ? 0.7 : 1
             applyIcon(for: item)
             indicator.configure(totalCount: items.count, currentIndex: currentIndex, animated: false)
             accessibilityLabel = String(localized: "topic.cell.a11y.pinned \(item.title)")

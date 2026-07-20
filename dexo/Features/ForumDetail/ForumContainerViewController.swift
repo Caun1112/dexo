@@ -7,6 +7,7 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
     private let api: DiscourseAPI
     private let authManager = AuthManager.shared
     private var notificationPoller: NotificationPoller?
+    private var hasPendingReadTimingsAutoDisabledAlert = false
 
     init(forum: ForumInstance) {
         self.forum = forum
@@ -33,6 +34,38 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         configureNavItems()
         startObservingAuth()
         startNotificationPoller()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(readTimingsWereAutoDisabled),
+            name: .linuxDoReadTimingsAutoDisabled,
+            object: api
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(presentPendingReadTimingsAlertIfPossible),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func readTimingsWereAutoDisabled() {
+        hasPendingReadTimingsAutoDisabledAlert = true
+        presentPendingReadTimingsAlertIfPossible()
+    }
+
+    @objc private func presentPendingReadTimingsAlertIfPossible() {
+        guard hasPendingReadTimingsAutoDisabledAlert,
+              view.window?.windowScene?.activationState == .foregroundActive,
+              presentedViewController == nil
+        else { return }
+        hasPendingReadTimingsAutoDisabledAlert = false
+        let alert = UIAlertController(
+            title: String(localized: "settings.read_timings.auto_disabled.title"),
+            message: String(localized: "settings.read_timings.auto_disabled.message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+        present(alert, animated: true)
     }
 
     private func startObservingAuth() {

@@ -23,6 +23,14 @@ final class DatabaseManager: Sendable {
         }
     }
 
+    /// Isolated database seam used by unit tests. Production code always uses
+    /// `shared`, while tests can validate migrations and retention without
+    /// touching the app's real Application Support container.
+    init(testingPath path: String) throws {
+        dbPool = try DatabasePool(path: path)
+        try migrator.migrate(dbPool)
+    }
+
     private var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
 
@@ -43,6 +51,56 @@ final class DatabaseManager: Sendable {
             try db.alter(table: "forumInstance") { t in
                 t.add(column: "username", .text)
             }
+        }
+
+        migrator.registerMigration("v3_read_history_and_timing_reports") { db in
+            try db.create(table: "localReadTopic") { t in
+                t.column("forumId", .integer)
+                    .notNull()
+                    .references("forumInstance", onDelete: .cascade)
+                t.column("accountKey", .text).notNull()
+                t.column("topicId", .integer).notNull()
+                t.column("title", .text).notNull()
+                t.column("fancyTitle", .text)
+                t.column("postsCount", .integer).notNull()
+                t.column("replyCount", .integer).notNull()
+                t.column("categoryId", .integer)
+                t.column("createdAt", .text).notNull()
+                t.column("avatarTemplate", .text)
+                t.column("tagsJSON", .text).notNull().defaults(to: "[]")
+                t.column("lastViewedAt", .datetime).notNull()
+                t.primaryKey(["forumId", "accountKey", "topicId"])
+            }
+            try db.create(
+                index: "localReadTopic_scope_viewedAt",
+                on: "localReadTopic",
+                columns: ["forumId", "accountKey", "lastViewedAt"]
+            )
+
+            try db.create(table: "topicTimingReport") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("forumId", .integer)
+                    .notNull()
+                    .references("forumInstance", onDelete: .cascade)
+                t.column("baseURL", .text).notNull()
+                t.column("accountName", .text)
+                t.column("topicId", .integer).notNull()
+                t.column("attemptedAt", .datetime).notNull()
+                t.column("topicTime", .integer).notNull()
+                t.column("postCount", .integer).notNull()
+                t.column("visibleTime", .integer).notNull()
+                t.column("requestDuration", .integer).notNull()
+                t.column("statusCode", .integer)
+                t.column("outcome", .text).notNull()
+                t.column("consecutiveFailureCount", .integer).notNull()
+                t.column("trippedBreaker", .boolean).notNull().defaults(to: false)
+                t.column("errorSummary", .text)
+            }
+            try db.create(
+                index: "topicTimingReport_attemptedAt",
+                on: "topicTimingReport",
+                columns: ["attemptedAt"]
+            )
         }
 
         return migrator
@@ -84,6 +142,93 @@ final class DatabaseManager: Sendable {
                 updated.sortOrder = index
                 try updated.update(db)
             }
+        }
+    }
+
+    // MARK: - Local Read History
+
+    func recordLocalRead(
+        topic: DiscourseTopicDetail,
+        scope: ReadHistoryScope,
+        viewedAt: Date = Date()
+    ) throws {
+        try dbPool.write { db in
+            var incoming = LocalReadTopic(topic: topic, scope: scope, viewedAt: viewedAt)
+            if let existing = try LocalReadTopic
+                .filter(Column("forumId") == scope.forumId)
+                .filter(Column("accountKey") == scope.accountKey)
+                .filter(Column("topicId") == topic.id)
+                .fetchOne(db)
+            {
+                if incoming.fancyTitle?.isEmpty != false { incoming.fancyTitle = existing.fancyTitle }
+                if incoming.avatarTemplate?.isEmpty != false { incoming.avatarTemplate = existing.avatarTemplate }
+                if incoming.tagsJSON == "[]" { incoming.tagsJSON = existing.tagsJSON }
+                if incoming.createdAt.isEmpty { incoming.createdAt = existing.createdAt }
+            }
+            try incoming.save(db)
+        }
+    }
+
+    func fetchLocalReads(scope: ReadHistoryScope) throws -> [LocalReadTopic] {
+        try dbPool.read { db in
+            try LocalReadTopic
+                .filter(Column("forumId") == scope.forumId)
+                .filter(Column("accountKey") == scope.accountKey)
+                .order(Column("lastViewedAt").desc)
+                .fetchAll(db)
+        }
+    }
+
+    func fetchLocalReadTopicIDs(scope: ReadHistoryScope) throws -> Set<Int> {
+        try dbPool.read { db in
+            let ids = try Int.fetchAll(
+                db,
+                sql: """
+                SELECT topicId FROM localReadTopic
+                WHERE forumId = ? AND accountKey = ?
+                """,
+                arguments: [scope.forumId, scope.accountKey]
+            )
+            return Set(ids)
+        }
+    }
+
+    // MARK: - Topic Timing Reports
+
+    func saveTopicTimingReport(_ report: inout TopicTimingReport) throws {
+        try dbPool.write { db in
+            try report.insert(db)
+            try db.execute(
+                sql: """
+                DELETE FROM topicTimingReport
+                WHERE id NOT IN (
+                    SELECT id FROM topicTimingReport
+                    ORDER BY attemptedAt DESC, id DESC
+                    LIMIT 200
+                )
+                """
+            )
+        }
+    }
+
+    func fetchTopicTimingReports(filter: TopicTimingReportFilter = .all) throws -> [TopicTimingReport] {
+        try dbPool.read { db in
+            var request = TopicTimingReport.order(Column("attemptedAt").desc, Column("id").desc)
+            switch filter {
+            case .all:
+                break
+            case .success:
+                request = request.filter(Column("outcome") == TopicTimingOutcome.success.rawValue)
+            case .failure:
+                request = request.filter(Column("outcome") != TopicTimingOutcome.success.rawValue)
+            }
+            return try request.fetchAll(db)
+        }
+    }
+
+    func clearTopicTimingReports() throws {
+        try dbPool.write { db in
+            _ = try TopicTimingReport.deleteAll(db)
         }
     }
 }
