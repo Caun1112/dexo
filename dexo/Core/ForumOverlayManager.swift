@@ -27,10 +27,23 @@ final class ForumOverlayManager {
 
     // MARK: - Present
 
-    func present(forum: ForumInstance, in window: UIWindow) {
+    @discardableResult
+    func present(forum: ForumInstance, in window: UIWindow) -> ForumContainerViewController? {
         // The forum-list screen offers the user an explicit HTTPS migration.
         // Keep this lower-level entry point fail-closed for every other caller.
-        guard ForumURLPolicy.isSecure(forum.baseURL) else { return }
+        guard ForumURLPolicy.isSecure(forum.baseURL) else { return nil }
+
+        if let currentContainer,
+           mainWindow === window,
+           isSameForum(currentContainer.forum, forum) {
+            if isMinimized {
+                restore()
+            } else {
+                overlayWindow?.isHidden = false
+                overlayWindow?.makeKeyAndVisible()
+            }
+            return currentContainer
+        }
 
         // Clean up any existing instance
         dismissOverlayWindow()
@@ -39,7 +52,7 @@ final class ForumOverlayManager {
 
         mainWindow = window
 
-        guard let scene = window.windowScene else { return }
+        guard let scene = window.windowScene else { return nil }
 
         let containerVC = ForumContainerViewController(forum: forum)
         currentContainer = containerVC
@@ -57,6 +70,28 @@ final class ForumOverlayManager {
         UIView.animate(withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0) {
             overlay.transform = .identity
         }
+        return containerVC
+    }
+
+    private func isSameForum(_ lhs: ForumInstance, _ rhs: ForumInstance) -> Bool {
+        if let lhsID = lhs.id, let rhsID = rhs.id {
+            return lhsID == rhsID
+        }
+        return normalizedBaseURL(lhs.baseURL) == normalizedBaseURL(rhs.baseURL)
+    }
+
+    private func normalizedBaseURL(_ value: String) -> String? {
+        guard var components = URLComponents(string: value),
+              components.scheme?.lowercased() == "https",
+              components.host != nil else { return nil }
+        components.scheme = "https"
+        components.host = components.host?.lowercased()
+        components.query = nil
+        components.fragment = nil
+        while components.path.count > 1 && components.path.hasSuffix("/") {
+            components.path.removeLast()
+        }
+        return components.string
     }
 
     // MARK: - Minimize

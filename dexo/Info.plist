@@ -155,6 +155,10 @@
 	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Allow Dexo to save images from posts to your Photos library.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INSendMessageIntent</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

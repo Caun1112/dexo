@@ -3,11 +3,18 @@ import Perception
 import UIKit
 
 final class ForumContainerViewController: BaseViewController, AuthGating {
+    private struct PendingPushDestination {
+        let topicID: Int
+        let floor: Int?
+        let completion: () -> Void
+    }
+
     private(set) var forum: ForumInstance
     private let api: DiscourseAPI
     private let authManager = AuthManager.shared
     private var notificationPoller: NotificationPoller?
     private var hasPendingReadTimingsAutoDisabledAlert = false
+    private var pendingPushDestination: PendingPushDestination?
 
     init(forum: ForumInstance) {
         self.forum = forum
@@ -25,13 +32,30 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         notificationPoller = nil
     }
 
-    func openPushNotification(relativeURL: String) {
+    @discardableResult
+    func openPushNotification(
+        relativeURL: String,
+        completion: @escaping () -> Void = {}
+    ) -> Bool {
         guard let destination = URL(string: relativeURL, relativeTo: URL(string: api.baseURL))?.absoluteURL,
               destination.scheme?.lowercased() == "https",
               destination.host?.lowercased() == URL(string: api.baseURL)?.host?.lowercased(),
-              let route = Self.topicRoute(from: destination) else { return }
+              let route = Self.topicRoute(from: destination) else { return false }
+        pendingPushDestination = PendingPushDestination(
+            topicID: route.topicID,
+            floor: route.floor,
+            completion: completion
+        )
+        openPendingPushDestinationIfPossible()
+        return true
+    }
+
+    private func openPendingPushDestinationIfPossible() {
+        guard viewIfLoaded?.window != nil,
+              let destination = pendingPushDestination else { return }
         guard let tabBar = children.first as? ForumTabBarController,
               let navigationController = tabBar.navigationControllers.first else { return }
+        pendingPushDestination = nil
         if #available(iOS 18.0, *) {
             tabBar.selectedTab = tabBar.tabs.first
         } else {
@@ -39,11 +63,12 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         }
         let viewController = TopicDetailControllerFactory.make(
             api: api,
-            topicId: route.topicID,
-            initialFloor: route.floor
+            topicId: destination.topicID,
+            initialFloor: destination.floor
         )
         navigationController.popToRootViewController(animated: false)
         navigationController.pushViewController(viewController, animated: true)
+        destination.completion()
     }
 
     private static func topicRoute(from url: URL) -> (topicID: Int, floor: Int?)? {
@@ -86,6 +111,11 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        openPendingPushDestinationIfPossible()
     }
 
     @objc private func readTimingsWereAutoDisabled() {

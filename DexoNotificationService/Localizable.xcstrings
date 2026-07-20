@@ -1,22 +1,191 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "push.encrypted_fallback.body" : {
+    "push.compact.like.format" : {
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Dexo to view this notification." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开 Dexo 查看此通知。" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ liked your post"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 赞了你"
+          }
+        }
+      }
+    },
+    "push.compact.link.format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ linked your post"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 链接了你的帖子"
+          }
+        }
+      }
+    },
+    "push.compact.mention.format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ mentioned you"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 提到你"
+          }
+        }
+      }
+    },
+    "push.compact.message.format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ sent you a message"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 发来消息"
+          }
+        }
+      }
+    },
+    "push.compact.new_topic.format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ created a new topic"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 发布了新主题"
+          }
+        }
+      }
+    },
+    "push.compact.post.format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ posted new content"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 发布了新内容"
+          }
+        }
+      }
+    },
+    "push.compact.private_message.format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ sent you a private message"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 私信你"
+          }
+        }
+      }
+    },
+    "push.compact.quote.format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ quoted you"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 引用了你"
+          }
+        }
+      }
+    },
+    "push.compact.reply.format" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ replied to you"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "@%@ 回复你"
+          }
+        }
+      }
+    },
+    "push.encrypted_fallback.body" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Dexo to view this notification."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Dexo 查看此通知。"
+          }
+        }
       }
     },
     "push.encrypted_fallback.title" : {
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "New forum notification" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新的论坛通知" } }
-      }
-    },
-    "push.forum.subtitle %@ %@" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$@" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$@" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New forum notification"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新的论坛通知"
+          }
+        }
       }
     }
   },

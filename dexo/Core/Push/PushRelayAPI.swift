@@ -52,17 +52,45 @@ final class PushRelayAPI: Sendable {
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.httpBody = try JSONEncoder().encode(input)
         let (data, response) = try await session.data(for: request)
-        guard let response = response as? HTTPURLResponse,
-              (200 ..< 300).contains(response.statusCode) else {
+        guard let response = response as? HTTPURLResponse else {
+#if DEBUG
+            print("[PushRelayAPI] POST /v1/endpoints returned a non-HTTP response")
+#endif
+            throw PushSubscriptionError.relayRejected
+        }
+#if DEBUG
+        Self.logResponse(data: data, statusCode: response.statusCode)
+#endif
+        guard (200 ..< 300).contains(response.statusCode) else {
             throw PushSubscriptionError.relayRejected
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let output = try decoder.decode(PushRelayEndpointResponse.self, from: data)
+#if DEBUG
+        print(
+            "[PushRelayAPI] endpoint response version=\(output.version) " +
+                "host=" +
+                "expiresAt=\(output.expiresAt)"
+        )
+#endif
         guard output.version == 1,
-              output.endpoint.hasPrefix(baseURL.absoluteString + "/v1/webpush/") else {
+              output.endpoint.hasPrefix(baseURL.absoluteString + "/v1/webpush/")
+        else {
             throw PushSubscriptionError.relayRejected
         }
         return output
     }
+
+#if DEBUG
+    private static func logResponse(data: Data, statusCode: Int) {
+        if (200 ..< 300).contains(statusCode) {
+            // A successful body contains the sealed APNs routing endpoint. Never log it.
+            print("[PushRelayAPI] POST /v1/endpoints status=\(statusCode) body=<redacted>")
+            return
+        }
+        let body = String(data: data.prefix(1_024), encoding: .utf8) ?? "<non-UTF8 body>"
+        print("[PushRelayAPI] POST /v1/endpoints status=\(statusCode) body=\(body)")
+    }
+#endif
 }

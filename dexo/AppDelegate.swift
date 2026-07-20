@@ -113,8 +113,6 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        PushDeepLinkCoordinator.shared.receive(
-            userInfo: response.notification.request.content.userInfo
-        )
+        PushDeepLinkCoordinator.shared.receive(response: response)
     }
 }
