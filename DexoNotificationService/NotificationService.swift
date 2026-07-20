@@ -35,6 +35,10 @@ final class NotificationService: UNNotificationServiceExtension {
 
         content.title = payload.title
         content.body = payload.body
+        applyForumIdentity(
+            for: subscription.forumBaseURL,
+            to: content
+        )
         if let tag = payload.tag, !tag.isEmpty {
             content.threadIdentifier = tag
         }
@@ -58,6 +62,26 @@ final class NotificationService: UNNotificationServiceExtension {
         contentHandler = nil
         bestAttemptContent = nil
         handler?(content)
+    }
+
+    private func applyForumIdentity(
+        for forumBaseURL: URL,
+        to content: UNMutableNotificationContent
+    ) {
+        guard let appGroup = Bundle.main.object(forInfoDictionaryKey: "DexoPushAppGroup") as? String,
+              let store = try? ForumNotificationMetadataStore(
+                appGroupIdentifier: appGroup
+              ),
+              let metadata = try? store.metadata(forBaseURL: forumBaseURL) else { return }
+        content.subtitle = String(
+            localized: "push.forum.subtitle \(metadata.name) \(metadata.domain)"
+        )
+        guard let iconURL = try? store.iconURL(for: metadata),
+              let attachment = try? UNNotificationAttachment(
+                identifier: "forum-icon",
+                url: iconURL
+              ) else { return }
+        content.attachments = [attachment]
     }
 }
 

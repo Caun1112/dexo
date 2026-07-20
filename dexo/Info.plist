@@ -4,6 +4,8 @@
 <dict>
 	<key>DexoAPNSEnvironment</key>
 	<string>$(DEXO_APNS_ENVIRONMENT)</string>
+	<key>DexoPushAppGroup</key>
+	<string>group.com.eilgnaw.dexo.push</string>
 	<key>DexoPushKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.eilgnaw.dexo.pushkeys</string>
 	<key>DexoPushRelayHost</key>

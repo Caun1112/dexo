@@ -59,6 +59,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             shouldReconcilePushSubscriptions = true
             application.registerForRemoteNotifications()
         }
+        Task {
+            await ForumNotificationMetadataSynchronizer.syncAll()
+        }
 
         return true
     }

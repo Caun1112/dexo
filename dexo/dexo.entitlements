@@ -4,6 +4,10 @@
 <dict>
 	<key>aps-environment</key>
 	<string>$(DEXO_APNS_ENVIRONMENT)</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.eilgnaw.dexo.push</string>
+	</array>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)com.eilgnaw.dexo.pushkeys</string>

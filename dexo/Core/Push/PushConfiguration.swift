@@ -6,6 +6,7 @@ struct PushConfiguration: Sendable {
     let apnsEnvironment: String
 
     static func load(bundle: Bundle = .main) throws -> PushConfiguration {
+        let keychainAccessGroup = try loadKeychainAccessGroup(bundle: bundle)
         guard let host = bundle.object(forInfoDictionaryKey: "DexoPushRelayHost") as? String,
               !host.isEmpty,
               !host.contains("://"),
@@ -14,11 +15,6 @@ struct PushConfiguration: Sendable {
               !host.contains("#"),
               let relayBaseURL = URL(string: "https://\(host)"),
               relayBaseURL.host == host,
-              let keychainAccessGroup = bundle.object(
-                forInfoDictionaryKey: "DexoPushKeychainAccessGroup"
-              ) as? String,
-              !keychainAccessGroup.isEmpty,
-              !keychainAccessGroup.contains("$("),
               let apnsEnvironment = bundle.object(
                 forInfoDictionaryKey: "DexoAPNSEnvironment"
               ) as? String,
@@ -30,5 +26,16 @@ struct PushConfiguration: Sendable {
             keychainAccessGroup: keychainAccessGroup,
             apnsEnvironment: apnsEnvironment
         )
+    }
+
+    static func loadKeychainAccessGroup(bundle: Bundle = .main) throws -> String {
+        guard let keychainAccessGroup = bundle.object(
+            forInfoDictionaryKey: "DexoPushKeychainAccessGroup"
+        ) as? String,
+              !keychainAccessGroup.isEmpty,
+              !keychainAccessGroup.contains("$(") else {
+            throw PushSubscriptionError.notConfigured
+        }
+        return keychainAccessGroup
     }
 }

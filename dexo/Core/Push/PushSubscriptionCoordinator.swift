@@ -73,6 +73,7 @@ final class PushSubscriptionCoordinator {
               !username.isEmpty else {
             throw PushSubscriptionError.missingForumIdentity
         }
+        await ForumNotificationMetadataSynchronizer.sync(forumID: forumID)
         let configuration = try PushConfiguration.load()
         let settings = try await api.fetchPushSiteSettings()
         let vapidKey = try settings.validatedVAPIDPublicKey()
@@ -225,8 +226,9 @@ final class PushSubscriptionCoordinator {
                 forumId: forumID,
                 accountName: username
               ) else { return }
-        let configuration = try PushConfiguration.load()
-        let keychain = try PushKeychainStore(accessGroup: configuration.keychainAccessGroup)
+        let keychain = try PushKeychainStore(
+            accessGroup: PushConfiguration.loadKeychainAccessGroup()
+        )
         let secret = try loadSecret(
             record.subscriptionID,
             username: username,

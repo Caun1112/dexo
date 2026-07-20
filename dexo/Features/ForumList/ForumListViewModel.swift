@@ -17,22 +17,35 @@ final class ForumListViewModel {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        Task {
+            await ForumNotificationMetadataSynchronizer.syncAll()
+        }
     }
 
     func deleteForum(at index: Int) {
         guard index < forums.count else { return }
         let forum = forums[index]
-        if ForumURLPolicy.isSecure(forum.baseURL) {
-            AuthManager.shared.logout(forum: forum)
-        } else {
-            // Never attempt server-side revocation for a blocked legacy URL.
-            AuthManager.shared.clearLocalAuthentication(for: forum.baseURL)
-        }
-        do {
-            try DatabaseManager.shared.deleteForum(forum)
-            forums.remove(at: index)
-        } catch {
-            errorMessage = error.localizedDescription
+        Task {
+            do {
+                if ForumURLPolicy.isSecure(forum.baseURL) {
+                    if let username = AuthManager.shared.username(for: forum.baseURL) {
+                        try await PushSubscriptionCoordinator(
+                            api: DiscourseAPI(forum: forum)
+                        ).disable(username: username)
+                    }
+                    AuthManager.shared.logout(forum: forum)
+                } else {
+                    // Never attempt server-side revocation for a blocked legacy URL.
+                    AuthManager.shared.clearLocalAuthentication(for: forum.baseURL)
+                }
+                try DatabaseManager.shared.deleteForum(forum)
+                if let currentIndex = forums.firstIndex(where: { $0.id == forum.id }) {
+                    forums.remove(at: currentIndex)
+                }
+                await ForumNotificationMetadataSynchronizer.syncAll()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 

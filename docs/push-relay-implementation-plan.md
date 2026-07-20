@@ -412,12 +412,18 @@ Notification Service Extension：
 ```text
 title            ← payload.title
 body             ← payload.body
+subtitle         ← App Group 中按 base_url 匹配的论坛名称与域名
+attachments      ← App 预缓存到 App Group 的论坛 PNG 图标（存在时）
 threadIdentifier ← payload.tag（存在时）
 userInfo          ← 加入已校验的 forum base URL 和 relative URL
 ```
 
 11. 调用 `contentHandler`。
 12. `serviceExtensionTimeWillExpire()` 始终返回本地化通用 fallback，禁止显示密文或错误详情。
+
+iOS 不允许远程通知替换左侧的应用主图标；该位置始终显示 Dexo 图标。论坛图标只能作为
+`UNNotificationAttachment` 交给系统展示。主 App 在启动及订阅时把已添加论坛的名称、
+规范化域名和栅格化 PNG 图标同步到 `group.com.eilgnaw.dexo.push`，扩展不为图标临时联网。
 
 主 App 点击通知后只处理扩展写入且已校验的 `forum_base_url` 与相对 `url`，复用现有论坛选择和 TopicDetail 深链逻辑；不直接信任未解密的 APNs 自定义字段。
 
@@ -511,13 +517,14 @@ DEXO_METRICS_ENABLED=false
 修改 `Project.swift`：
 
 1. 增加本地包 `Packages/PushCrypto`。
-2. App target 增加 Push Notifications capability 和 Keychain Sharing entitlement。
+2. App target 增加 Push Notifications、Keychain Sharing 和 App Groups entitlement。
 3. 新增 `DexoNotificationService` app extension target：
    - product：app extension
    - bundle ID：`com.eilgnaw.dexo.NotificationService`
    - deployment target：iOS 16.0
    - 依赖 `PushCrypto`
    - 与主 App 使用相同 Keychain Access Group
+   - 与主 App 使用 `group.com.eilgnaw.dexo.push` App Group
 4. 主 App embedding 该扩展。
 5. 增加 relay host build setting，默认使用不可路由占位符并关闭功能。
 
