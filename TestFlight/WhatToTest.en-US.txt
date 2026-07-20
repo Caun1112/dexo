@@ -1,4 +1,8 @@
 What to Test
 
-- Enable DoH and open a login or verification page. Confirm it loads and works normally.
-- Exit and use DoH again. Confirm it continues to work.
+- In a signed build configured with the push relay, sign in to a forum, open Me > Push Notifications, enable notifications, and grant the system permission when prompted.
+- Trigger a traditional Discourse private message, reply, mention, and quote. Confirm each notification shows the source forum icon, uses a compact title such as “@user replied to you,” and does not include the forum domain.
+- Add and sign in to two forums. While viewing one forum, tap a notification from the other and confirm Dexo switches forums and opens the correct topic or post.
+- After opening a notification, confirm delivered notifications for the same forum and topic are cleared. If no notifications remain, confirm the app badge is cleared.
+- Disable notifications and confirm new forum notifications stop. Also confirm signing out does not leave an active push subscription behind.
+- Discourse Chat is out of scope for this build. Test only topic-based `/t/...` notifications and private messages.
