@@ -5,4 +5,6 @@ What to Test
 - Add and sign in to two forums. While viewing one forum, tap a notification from the other and confirm Dexo switches forums and opens the correct topic or post.
 - After opening a notification, confirm delivered notifications for the same forum and topic are cleared. If no notifications remain, confirm the app badge is cleared.
 - Disable notifications and confirm new forum notifications stop. Also confirm signing out does not leave an active push subscription behind.
+- Revoke the current Discourse session or User API Key on the forum, then trigger a protected API request. Confirm Me immediately switches to the signed-out state and notification polling stops.
+- With push enabled, sign out or remove the forum while Web Push unregistration is rejected or the forum is unreachable. Confirm the operation still completes and no locally decryptable push subscription remains.
 - Discourse Chat is out of scope for this build. Test only topic-based `/t/...` notifications and private messages.

@@ -28,10 +28,15 @@ final class ForumListViewModel {
         Task {
             do {
                 if ForumURLPolicy.isSecure(forum.baseURL) {
-                    if let username = AuthManager.shared.username(for: forum.baseURL) {
-                        try await PushSubscriptionCoordinator(
-                            api: DiscourseAPI(forum: forum)
-                        ).disable(username: username)
+                    let coordinator = PushSubscriptionCoordinator(
+                        api: DiscourseAPI(forum: forum)
+                    )
+                    if let username = AuthManager.shared.username(for: forum.baseURL)
+                        ?? forum.username
+                    {
+                        await coordinator.disableForLogout(username: username)
+                    } else {
+                        coordinator.discardLocalSubscriptions()
                     }
                     AuthManager.shared.logout(forum: forum)
                 } else {

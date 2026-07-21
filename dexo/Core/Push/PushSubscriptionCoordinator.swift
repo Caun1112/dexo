@@ -250,6 +250,63 @@ final class PushSubscriptionCoordinator {
         try keychain.delete(subscriptionID: record.subscriptionID)
     }
 
+    /// Logout must not be blocked by an unreachable forum or an expired
+    /// credential. Try to unregister every known endpoint, then always remove
+    /// the local decryption material and database record.
+    func disableForLogout(username: String) async {
+        guard let forumID = api.forumID else { return }
+        guard let record = try? database.fetchPushSubscription(
+                forumId: forumID,
+                accountName: username
+              ) else {
+            discardLocalSubscriptions()
+            return
+        }
+
+        let keychain = try? PushKeychainStore(
+            accessGroup: PushConfiguration.loadKeychainAccessGroup()
+        )
+        let secret = keychain.flatMap {
+            try? loadSecret(record.subscriptionID, username: username, from: $0)
+        }
+
+        if let secret {
+            var endpoints = [record.endpoint]
+            if let previousEndpoint = record.previousEndpoint {
+                endpoints.append(previousEndpoint)
+            }
+            for endpoint in endpoints {
+                do {
+                    try await api.unsubscribePush(
+                        endpoint: endpoint,
+                        p256dh: secret.keyMaterial.p256dh,
+                        auth: secret.keyMaterial.auth
+                    )
+                } catch {
+                    debugLog("[PushSubscriptionCoordinator] best-effort logout unsubscribe failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        discardLocalSubscriptions()
+    }
+
+    /// Drops every local subscription for this forum without contacting it.
+    /// Used after the forum has already rejected the current authentication.
+    func discardLocalSubscriptions() {
+        guard let forumID = api.forumID,
+              let records = try? database.fetchAllPushSubscriptions()
+        else { return }
+        let keychain = try? PushKeychainStore(
+            accessGroup: PushConfiguration.loadKeychainAccessGroup()
+        )
+
+        for record in records where record.forumId == forumID {
+            try? database.deletePushSubscription(subscriptionID: record.subscriptionID)
+            try? keychain?.delete(subscriptionID: record.subscriptionID)
+        }
+    }
+
     private func loadSecret(
         _ subscriptionID: String,
         username: String,

@@ -101,6 +101,12 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         startNotificationPoller()
         NotificationCenter.default.addObserver(
             self,
+            selector: #selector(forumAuthenticationDidChange(_:)),
+            name: .discourseAuthDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
             selector: #selector(readTimingsWereAutoDisabled),
             name: .linuxDoReadTimingsAutoDisabled,
             object: api
@@ -111,6 +117,24 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
+    }
+
+    @objc private func forumAuthenticationDidChange(_ notification: Notification) {
+        let changedBaseURL = (notification.userInfo?["baseURL"] as? String)?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let currentBaseURL = forum.baseURL.trimmingCharacters(
+            in: CharacterSet(charactersIn: "/")
+        )
+        guard changedBaseURL == currentBaseURL else { return }
+
+        if isAuthenticated() {
+            if notificationPoller == nil {
+                startNotificationPoller()
+            }
+        } else {
+            notificationPoller?.stop()
+            notificationPoller = nil
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -331,29 +355,17 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
     }
 
     func performLogout() {
+        let coordinator = PushSubscriptionCoordinator(api: api)
         if let username = authManager.username(for: forum.baseURL) {
-            let coordinator = PushSubscriptionCoordinator(api: api)
             if coordinator.hasSubscription(username: username) {
                 Task {
-                    do {
-                        try await coordinator.disable(username: username)
-                        self.finishLogout()
-                    } catch {
-                        let alert = UIAlertController(
-                            title: String(localized: "push.logout_cleanup.title"),
-                            message: String(localized: "push.logout_cleanup.message \(error.localizedDescription)"),
-                            preferredStyle: .alert
-                        )
-                        alert.addAction(UIAlertAction(
-                            title: String(localized: "action.ok"),
-                            style: .default
-                        ))
-                        self.present(alert, animated: true)
-                    }
+                    await coordinator.disableForLogout(username: username)
+                    self.finishLogout()
                 }
                 return
             }
         }
+        coordinator.discardLocalSubscriptions()
         finishLogout()
     }
 

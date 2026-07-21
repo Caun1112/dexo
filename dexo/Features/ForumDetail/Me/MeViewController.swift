@@ -86,6 +86,13 @@ final class MeViewController: ObservableViewController {
             }
         }
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(authDidChange(_:)),
+            name: .discourseAuthDidChange,
+            object: nil
+        )
+
         let isLoggedIn = authGate?.isAuthenticated() ?? false
         if isLoggedIn {
             skeletonView.isHidden = false
@@ -195,6 +202,23 @@ final class MeViewController: ObservableViewController {
         }
     }
 
+    @objc private func authDidChange(_ notification: Notification) {
+        let changedBaseURL = (notification.userInfo?["baseURL"] as? String)?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let currentBaseURL = api.baseURL.trimmingCharacters(
+            in: CharacterSet(charactersIn: "/")
+        )
+        guard changedBaseURL == currentBaseURL else { return }
+
+        if authGate?.isAuthenticated() == true {
+            loadData()
+        } else {
+            viewModel.clearCachedProfile()
+            viewModel.requiresLogin = true
+            hasLoaded = true
+        }
+    }
+
     @objc private func pullToRefresh() {
         Task {
             await viewModel.reload()
@@ -223,29 +247,7 @@ final class MeViewController: ObservableViewController {
         )
         alert.addAction(UIAlertAction(title: String(localized: "me.logout"), style: .destructive) { [weak self] _ in
             guard let self else { return }
-            Task {
-                do {
-                    if let username = self.viewModel.currentUser?.username {
-                        try await PushSubscriptionCoordinator(api: self.api).disable(
-                            username: username
-                        )
-                    }
-                    self.authGate?.performLogout()
-                    self.viewModel.clearCachedProfile()
-                    self.viewModel.requiresLogin = true
-                } catch {
-                    let errorAlert = UIAlertController(
-                        title: String(localized: "push.logout_cleanup.title"),
-                        message: String(localized: "push.logout_cleanup.message \(error.localizedDescription)"),
-                        preferredStyle: .alert
-                    )
-                    errorAlert.addAction(UIAlertAction(
-                        title: String(localized: "action.ok"),
-                        style: .default
-                    ))
-                    self.present(errorAlert, animated: true)
-                }
-            }
+            self.authGate?.performLogout()
         })
         alert.addAction(UIAlertAction(title: String(localized: "cancel"), style: .cancel))
         present(alert, animated: true)

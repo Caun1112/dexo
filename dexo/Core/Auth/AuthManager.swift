@@ -341,6 +341,24 @@ final class AuthManager: @unchecked Sendable {
         postAuthChange(for: normalized)
     }
 
+    /// Clears a credential that the forum has explicitly rejected. Unlike a
+    /// user-initiated logout, this never attempts to revoke the already-invalid
+    /// server credential.
+    func invalidateExpiredAuthentication(for baseURL: String) {
+        let normalized = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard KeychainHelper.getUserApiKey(for: normalized) != nil else { return }
+
+        clearLocalAuthentication(for: normalized)
+
+        guard var forum = (try? DatabaseManager.shared.fetchAllForums())?
+            .first(where: {
+                $0.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) == normalized
+            })
+        else { return }
+        forum.username = nil
+        _ = try? DatabaseManager.shared.saveForum(&forum)
+    }
+
     func restoreAuthState(for forum: ForumInstance) {
         let baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if let username = forum.username, isAuthenticated(for: baseURL) {

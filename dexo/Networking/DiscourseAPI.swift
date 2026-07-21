@@ -524,6 +524,13 @@ final class DiscourseAPI {
             interceptor.updateCSRFToken(newToken)
         }
 
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
+        }
+
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             if let data = response.data,
                let errBody = try? JSONDecoder().decode(UploadErrorResponse.self, from: data),
@@ -630,6 +637,12 @@ final class DiscourseAPI {
         let route = DiscourseRouter.deleteBookmark(id: id)
         let url = baseURL + route.path
         let response = await session.request(url, method: route.method).serializingData().response
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
+        }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to delete bookmark"], errorType: nil)
         }
@@ -645,6 +658,12 @@ final class DiscourseAPI {
         ).serializingData().response
         if isCloudflareChallengeResponse(response.data) {
             throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
+        }
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
         }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to delete boost"], errorType: nil)
@@ -664,6 +683,12 @@ final class DiscourseAPI {
         ).serializingData().response
         if isCloudflareChallengeResponse(response.data) {
             throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
+        }
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
         }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to toggle reaction"], errorType: nil)
@@ -689,6 +714,12 @@ final class DiscourseAPI {
         if isCloudflareChallengeResponse(response.data) {
             throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
         }
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
+        }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to like post"], errorType: nil)
         }
@@ -704,6 +735,12 @@ final class DiscourseAPI {
         ).serializingData().response
         if isCloudflareChallengeResponse(response.data) {
             throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
+        }
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
         }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to unlike post"], errorType: nil)
@@ -744,6 +781,12 @@ final class DiscourseAPI {
         if let id { parameters = ["id": id] }
         let response = await session.request(url, method: route.method, parameters: parameters, encoding: JSONEncoding.default)
             .serializingData().response
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
+        }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to mark notification read"], errorType: nil)
         }
@@ -793,6 +836,12 @@ final class DiscourseAPI {
         let response = await session.request(url, method: route.method, parameters: parameters, encoding: URLEncoding.default)
             .serializingData().response
         let requestDuration = Int(Date().timeIntervalSince(requestStart) * 1000)
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
+        }
         let assessment = assessTopicTimingResponse(
             statusCode: response.response?.statusCode,
             data: response.data,
@@ -893,6 +942,12 @@ final class DiscourseAPI {
         if !cookieHeader.isEmpty { req.setValue(cookieHeader, forHTTPHeaderField: "Cookie") }
         if let ua = WebCookieStore.shared.userAgent { req.setValue(ua, forHTTPHeaderField: "User-Agent") }
         let response = await session.request(req).serializingData().response
+        if authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) != nil {
+            return nil
+        }
         guard let data = response.data, let html = String(data: data, encoding: .utf8) else { return nil }
         // Extract <meta name="shared_session_key" content="...">
         guard let range = html.range(of: #"<meta name="shared_session_key" content="([^"]+)""#, options: .regularExpression),
@@ -914,6 +969,12 @@ final class DiscourseAPI {
         }
         let response = await session.request(url, method: route.method, parameters: channels, encoding: URLEncoding.default, headers: headers)
             .serializingData().response
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
+        }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["MessageBus poll failed"], errorType: nil)
         }
@@ -1053,11 +1114,21 @@ final class DiscourseAPI {
             throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
         }
 
+        if let authError = authenticationFailureError(
+            statusCode: response.response?.statusCode,
+            data: response.data
+        ) {
+            throw authError
+        }
+
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             if statusCode == 403 {
                 let data = response.data ?? Data()
                 if let errBody = try? JSONDecoder().decode(DiscourseErrorResponse.self, from: data), !errBody.errors.isEmpty {
-                    throw DiscourseAPIError(messages: errBody.errors, errorType: "forbidden")
+                    throw DiscourseAPIError(
+                        messages: errBody.errors,
+                        errorType: errBody.errorType ?? "forbidden"
+                    )
                 }
                 throw DiscourseAPIError(messages: ["Session expired, please log in again"], errorType: "forbidden")
             }
@@ -1072,6 +1143,23 @@ final class DiscourseAPI {
         }
 
         return try response.result.get()
+    }
+
+    private func authenticationFailureError(
+        statusCode: Int?,
+        data: Data?
+    ) -> DiscourseAPIError? {
+        guard isDiscourseAuthenticationFailure(statusCode: statusCode, data: data) else {
+            return nil
+        }
+        PushSubscriptionCoordinator(api: self).discardLocalSubscriptions()
+        AuthManager.shared.invalidateExpiredAuthentication(for: baseURL)
+        let messages = data
+            .flatMap { try? JSONDecoder().decode(DiscourseErrorResponse.self, from: $0) }
+            .map(\.errors)
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? ["Session expired, please log in again"]
+        return DiscourseAPIError(messages: messages, errorType: "not_logged_in")
     }
 }
 
@@ -1091,6 +1179,15 @@ private struct DiscourseErrorResponse: Decodable {
         case errors
         case errorType = "error_type"
     }
+}
+
+func isDiscourseAuthenticationFailure(statusCode: Int?, data: Data?) -> Bool {
+    if statusCode == 401 { return true }
+    guard statusCode == 403,
+          let data,
+          let response = try? JSONDecoder().decode(DiscourseErrorResponse.self, from: data)
+    else { return false }
+    return response.errorType == "not_logged_in"
 }
 
 private struct UploadErrorResponse: Decodable {
