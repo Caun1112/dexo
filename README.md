@@ -92,6 +92,10 @@ dexo/
 └── Assets.xcassets/
 ```
 
+## Related Projects
+
+- **[Dexo Push Relay](https://github.com/Eilgnaw/dexo-push-relay)** — Stateless Web Push to APNs relay
+
 ## Links
 
 - **[Linux.do](https://linux.do)**

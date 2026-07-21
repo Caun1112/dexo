@@ -92,6 +92,10 @@ dexo/
 └── Assets.xcassets/
 ```
 
+## 关联项目
+
+- **[Dexo Push Relay](https://github.com/Eilgnaw/dexo-push-relay)** — 无状态 Web Push 至 APNs 中继
+
 ## 友链
 
 - **[Linux.do](https://linux.do)** — 学 AI，上 L 站
