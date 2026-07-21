@@ -108,6 +108,7 @@ let project = Project(
             bundleId: "com.eilgnaw.dexo.NotificationService",
             deploymentTargets: .iOS("16.0"),
             infoPlist: .extendingDefault(with: [
+                "CFBundleDisplayName": "Dexo",
                 "DexoPushAppGroup": "group.com.eilgnaw.dexo.push",
                 "DexoPushKeychainAccessGroup": "$(AppIdentifierPrefix)com.eilgnaw.dexo.pushkeys",
                 "NSExtension": [
