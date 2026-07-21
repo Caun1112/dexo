@@ -49,7 +49,8 @@ jobs:
       - name: Read version
         id: version
         run: |
-          VERSION=$(grep -o '"MARKETING_VERSION": "[^"]*"' Project.swift | grep -o '"[^"]*"$' | tr -d '"')
+          VERSION=$(awk -F'"' '/"MARKETING_VERSION":/ { print $4; exit }' Project.swift)
+          test -n "$VERSION"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Create tag and Release
