@@ -1,6 +1,6 @@
 What to Test
 
-- In a signed build configured with the push relay, sign in to a forum, open Me > Push Notifications, enable notifications, and grant the system permission when prompted.
+- In a signed build configured with the push relay, sign in to a forum, open Me > Push Notifications, enable notifications, and grant the system permission when prompted. If permission was previously denied, confirm the app guides you to Settings.
 - Trigger a traditional Discourse private message, reply, mention, and quote. Confirm each notification shows the source forum icon, uses a compact title such as “@user replied to you,” and does not include the forum domain.
 - Add and sign in to two forums. While viewing one forum, tap a notification from the other and confirm Dexo switches forums and opens the correct topic or post.
 - After opening a notification, confirm delivered notifications for the same forum and topic are cleared. If no notifications remain, confirm the app badge is cleared.
