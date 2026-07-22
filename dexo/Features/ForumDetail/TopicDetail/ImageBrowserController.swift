@@ -50,7 +50,7 @@ final class ImageBrowserController: LightboxController {
     /// Distance (pt) past which a release ends in dismissal. Below this the
     /// gesture snaps back, letting the user freely drag in any direction and
     /// release without losing the viewer.
-    private static let dismissTranslationThreshold: CGFloat = 160
+    private static let dismissTranslationThreshold: CGFloat = 120
     /// Vertical velocity (pt/s) that triggers dismissal regardless of distance —
     /// gives a quick flick the expected "throw it away" behavior.
     private static let dismissVelocityThreshold: CGFloat = 1400

@@ -79,6 +79,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
     private var hasPendingSnapshot = false
     private var pendingSnapshotReloadVisible = false
     private var pendingSnapshotAnchor: (VirtualTopicItem, CGFloat)?
+    private var pendingReactionConfirmationPostIds: Set<Int> = []
     private var pendingLoadEarlierPostIds: [Int]?
     private var isLoadingPage = false
     private var loadEarlierArmed = true
@@ -237,6 +238,11 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
             cell.onShowReplies = { [weak self] in self?.postCell(didTapShowRepliesForPostId: post.id) }
             cell.onCollapse = { [weak self] in
                 self?.postCell(didToggleCollapseForPostId: postId)
+            }
+            if self.pendingReactionConfirmationPostIds.remove(postId) != nil {
+                DispatchQueue.main.async { [weak cell] in
+                    cell?.playReactionDestinationFeedback()
+                }
             }
             return cell
 
@@ -1824,7 +1830,16 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
         Task {
             do {
                 try await api.toggleReaction(postId: post.id, reactionId: reactionId)
-                if let fresh = try? await api.fetchPost(id: post.id) { await viewModel.replacePost(fresh) }
+                playReactionSuccessFeedback(
+                    forPostId: post.id,
+                    animated: post.currentUserReaction?.id != reactionId
+                )
+                if let fresh = try? await api.fetchPost(id: post.id) {
+                    await viewModel.replacePost(fresh)
+                    if post.currentUserReaction?.id != reactionId {
+                        pendingReactionConfirmationPostIds.insert(post.id)
+                    }
+                }
                 applySnapshot(reloadVisible: true)
             } catch {
                 presentChallengePromptIfNeeded(error: error, on: api)
@@ -1837,12 +1852,26 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
             do {
                 if liked { try await api.likePost(postId: post.id) }
                 else { try await api.unlikePost(postId: post.id) }
-                if let fresh = try? await api.fetchPost(id: post.id) { await viewModel.replacePost(fresh) }
+                playReactionSuccessFeedback(forPostId: post.id, animated: liked)
+                if let fresh = try? await api.fetchPost(id: post.id) {
+                    await viewModel.replacePost(fresh)
+                    if liked { pendingReactionConfirmationPostIds.insert(post.id) }
+                }
                 applySnapshot(reloadVisible: true)
             } catch {
                 presentChallengePromptIfNeeded(error: error, on: api)
             }
         }
+    }
+
+    private func playReactionSuccessFeedback(forPostId postId: Int, animated: Bool) {
+        guard let indexPath = dataSource.indexPath(for: .footer(postId)),
+              let cell = collectionView.cellForItem(at: indexPath) as? VirtualPostFooterCell
+        else {
+            if animated { ReactionFeedback.play(from: nil) }
+            return
+        }
+        cell.playReactionSuccessFeedback(animated: animated)
     }
 
     func postCell(didTapBoostForPost post: DiscourseTopicDetail.Post) {

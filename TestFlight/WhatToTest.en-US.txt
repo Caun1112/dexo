@@ -1,10 +1,4 @@
 What to Test
 
-- In a signed build configured with the push relay, sign in to a forum, open Me > Push Notifications, enable notifications, and grant the system permission when prompted. If permission was previously denied, confirm the app guides you to Settings.
-- Trigger a traditional Discourse private message, reply, mention, and quote. Confirm each notification shows the source forum icon, uses a compact title such as “@user replied to you,” and does not include the forum domain.
-- Add and sign in to two forums. While viewing one forum, tap a notification from the other and confirm Dexo switches forums and opens the correct topic or post.
-- After opening a notification, confirm delivered notifications for the same forum and topic are cleared. If no notifications remain, confirm the app badge is cleared.
-- Disable notifications and confirm new forum notifications stop. Also confirm signing out does not leave an active push subscription behind.
-- Revoke the current Discourse session or User API Key on the forum, then trigger a protected API request. Confirm Me immediately switches to the signed-out state and notification polling stops.
-- With push enabled, sign out or remove the forum while Web Push unregistration is rejected or the forum is unreachable. Confirm the operation still completes and no locally decryptable push subscription remains.
-- Discourse Chat is out of scope for this build. Test only topic-based `/t/...` notifications and private messages.
+- React to a post and confirm the feedback feels quick and clear. Tap again to remove the reaction and confirm it stays quiet.
+- Open an image in a post, then pull down to close it and confirm the gesture feels natural.

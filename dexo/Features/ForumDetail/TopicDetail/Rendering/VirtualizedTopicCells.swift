@@ -801,6 +801,10 @@ final class VirtualPostReactionSummaryView: UIStackView {
     var visibleReactionCount: Int { reactionImageViews.filter { !$0.isHidden }.count }
     var displayedCount: String? { countLabel.isHidden ? nil : countLabel.text }
 
+    func playSuccessConfirmation() {
+        ReactionFeedback.confirm(on: self, countView: countLabel)
+    }
+
     private func clear(_ imageView: UIImageView) {
         imageView.sd_cancelCurrentImageLoad()
         imageView.image = nil
@@ -848,9 +852,9 @@ enum VirtualPostReactionActionResolver {
 
 private final class VirtualReactionPickerViewController: UIViewController {
     private let reactions: [String]
-    private let onSelect: (String) -> Void
+    private let onSelect: (String, UIButton) -> Void
 
-    init(reactions: [String], onSelect: @escaping (String) -> Void) {
+    init(reactions: [String], onSelect: @escaping (String, UIButton) -> Void) {
         self.reactions = reactions
         self.onSelect = onSelect
         super.init(nibName: nil, bundle: nil)
@@ -929,8 +933,8 @@ private final class VirtualReactionPickerViewController: UIViewController {
         }
         button.addAction(UIAction { [weak self] _ in
             guard let self else { return }
+            onSelect(reaction, button)
             dismiss(animated: true)
-            onSelect(reaction)
         }, for: .touchUpInside)
         return button
     }
@@ -952,6 +956,7 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
     private var reactionLeadingConstraint: NSLayoutConstraint!
     private var currentPost: DiscourseTopicDetail.Post?
     private var validReactions: [String] = []
+    private var pendingReactionFeedbackSource: ReactionFeedback.CapturedSource?
     var onReply: (() -> Void)?
     var onLike: (() -> Void)?
     var onReaction: ((String) -> Void)?
@@ -1120,12 +1125,36 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
         currentReactionImageView.isHidden = true
         currentPost = nil
         validReactions = []
+        pendingReactionFeedbackSource = nil
         collapsePill.configure(state: nil, isLastVisualItem: false)
     }
 
     @objc private func replyTapped() { onReply?() }
+
+    func playReactionSuccessFeedback(animated: Bool) {
+        guard animated else {
+            pendingReactionFeedbackSource = nil
+            return
+        }
+        if let source = pendingReactionFeedbackSource {
+            pendingReactionFeedbackSource = nil
+            ReactionFeedback.play(captured: source, to: reactionSummaryView)
+        } else {
+            ReactionFeedback.play(from: like, to: reactionSummaryView)
+        }
+    }
+
+    func playReactionDestinationFeedback() {
+        if reactionSummaryView.isHidden {
+            ReactionFeedback.confirm(on: like)
+        } else {
+            reactionSummaryView.playSuccessConfirmation()
+        }
+    }
+
     @objc private func likeTapped() {
         guard let post = currentPost else { return }
+        pendingReactionFeedbackSource = nil
         let action = VirtualPostReactionActionResolver.resolve(
             hasPlugin: !validReactions.isEmpty,
             currentReactionId: post.currentUserReaction?.id,
@@ -1146,6 +1175,7 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
 
     @objc private func likeLongPressed(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began, like.isEnabled else { return }
+        pendingReactionFeedbackSource = nil
         if validReactions.isEmpty { likeTapped() } else { presentReactionPicker() }
     }
 
@@ -1169,7 +1199,8 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
 
     private func presentReactionPicker() {
         guard !validReactions.isEmpty else { return }
-        let picker = VirtualReactionPickerViewController(reactions: validReactions) { [weak self] reaction in
+        let picker = VirtualReactionPickerViewController(reactions: validReactions) { [weak self] reaction, sourceButton in
+            self?.pendingReactionFeedbackSource = ReactionFeedback.capture(sourceButton)
             self?.onReaction?(reaction)
         }
         picker.modalPresentationStyle = .popover

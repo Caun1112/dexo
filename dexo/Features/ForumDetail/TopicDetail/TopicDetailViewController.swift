@@ -2538,7 +2538,13 @@ extension LegacyTopicDetailViewController: PostCellDelegate {
         Task {
             do {
                 try await api.toggleReaction(postId: post.id, reactionId: reactionId)
-                await refreshPost(id: post.id)
+                playReactionSuccessFeedback(
+                    forPostId: post.id,
+                    animated: post.currentUserReaction?.id != reactionId
+                )
+                if await refreshPost(id: post.id), post.currentUserReaction?.id != reactionId {
+                    playReactionDestinationFeedback(forPostId: post.id)
+                }
             } catch {
                 presentChallengePromptIfNeeded(error: error, on: api)
             }
@@ -2553,7 +2559,10 @@ extension LegacyTopicDetailViewController: PostCellDelegate {
                 } else {
                     try await api.unlikePost(postId: post.id)
                 }
-                await refreshPost(id: post.id)
+                playReactionSuccessFeedback(forPostId: post.id, animated: liked)
+                if await refreshPost(id: post.id), liked {
+                    playReactionDestinationFeedback(forPostId: post.id)
+                }
             } catch {
                 presentChallengePromptIfNeeded(error: error, on: api)
             }
@@ -2570,11 +2579,23 @@ extension LegacyTopicDetailViewController: PostCellDelegate {
         presentChallengePromptIfNeeded(error: error, on: api)
     }
 
+    private func playReactionSuccessFeedback(forPostId postId: Int, animated: Bool) {
+        if let cell = cellForPost(id: postId) as? PostNativeCell {
+            cell.playReactionSuccessFeedback(animated: animated)
+        } else if animated {
+            ReactionFeedback.play(from: nil)
+        }
+    }
+
+    private func playReactionDestinationFeedback(forPostId postId: Int) {
+        (cellForPost(id: postId) as? PostNativeCell)?.playReactionDestinationFeedback()
+    }
+
     /// Re-fetch a single post and ask the data source to reconfigure its row.
     /// Used after like/reaction toggles since neither endpoint returns the new
     /// post state.
-    private func refreshPost(id: Int) async {
-        guard let fresh = try? await api.fetchPost(id: id) else { return }
+    private func refreshPost(id: Int) async -> Bool {
+        guard let fresh = try? await api.fetchPost(id: id) else { return false }
         await viewModel.replacePost(fresh)
         invalidatePrecomputedHeights(forPostId: id)
         var snapshot = dataSource.snapshot()
@@ -2583,6 +2604,7 @@ extension LegacyTopicDetailViewController: PostCellDelegate {
             snapshot.reconfigureItems([item])
             await dataSource.apply(snapshot, animatingDifferences: false)
         }
+        return true
     }
 
     func postCell(didTapBoostForPost post: DiscourseTopicDetail.Post) {

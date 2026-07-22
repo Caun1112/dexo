@@ -218,6 +218,7 @@ final class PostNativeCell: UITableViewCell, TopicPostIDProviding {
     private var postLink: String?
     private var currentPost: DiscourseTopicDetail.Post?
     private var validReactions: [String] = []
+    private var pendingReactionFeedbackSource: ReactionFeedback.CapturedSource?
 
     // MARK: - Header UI
 
@@ -1261,6 +1262,7 @@ final class PostNativeCell: UITableViewCell, TopicPostIDProviding {
 
     @objc private func reactButtonTapped() {
         guard let post = currentPost else { return }
+        pendingReactionFeedbackSource = nil
 
         // Reactions plugin path. The standard like is undone via DELETE
         // /post_actions, but any non-heart reaction can only be cleared via
@@ -1303,6 +1305,7 @@ final class PostNativeCell: UITableViewCell, TopicPostIDProviding {
 
     @objc private func reactButtonLongPressed(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began, let post = currentPost else { return }
+        pendingReactionFeedbackSource = nil
         // Respect the same gating as a tap — own posts shouldn't open the picker.
         guard reactButton.isEnabled else { return }
 
@@ -1457,6 +1460,7 @@ final class PostNativeCell: UITableViewCell, TopicPostIDProviding {
 
         button.addAction(UIAction { [weak self, weak presenter] _ in
             guard let self, let post = self.currentPost else { return }
+            self.pendingReactionFeedbackSource = ReactionFeedback.capture(button)
             presenter?.dismiss(animated: true)
             // Reactions plugin path — every emoji (heart included) goes
             // through the toggle endpoint, which handles add/remove.
@@ -1464,6 +1468,27 @@ final class PostNativeCell: UITableViewCell, TopicPostIDProviding {
         }, for: .touchUpInside)
 
         return button
+    }
+
+    func playReactionSuccessFeedback(animated: Bool) {
+        guard animated else {
+            pendingReactionFeedbackSource = nil
+            return
+        }
+        if let source = pendingReactionFeedbackSource {
+            pendingReactionFeedbackSource = nil
+            ReactionFeedback.play(captured: source, to: reactionStackView)
+        } else {
+            ReactionFeedback.play(from: reactButton, to: reactionStackView)
+        }
+    }
+
+    func playReactionDestinationFeedback() {
+        if reactionStackView.isHidden {
+            ReactionFeedback.confirm(on: reactButton)
+        } else {
+            ReactionFeedback.confirm(on: reactionStackView, countView: reactionCountLabel)
+        }
     }
 
     @objc private func boostButtonTapped() {
@@ -1513,6 +1538,7 @@ final class PostNativeCell: UITableViewCell, TopicPostIDProviding {
         }
         reactionCountLabel.isHidden = true
         validReactions = []
+        pendingReactionFeedbackSource = nil
         cancelUserReactionImageLoad()
         reactButton.setImage(Self.heartImage, for: .normal)
         reactButton.setTitle(nil, for: .normal)

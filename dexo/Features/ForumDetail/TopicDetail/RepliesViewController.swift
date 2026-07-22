@@ -387,7 +387,13 @@ extension RepliesViewController: PostCellDelegate {
         Task {
             do {
                 try await api.toggleReaction(postId: post.id, reactionId: reactionId)
-                await refreshPost(id: post.id)
+                playReactionSuccessFeedback(
+                    forPostId: post.id,
+                    animated: post.currentUserReaction?.id != reactionId
+                )
+                if await refreshPost(id: post.id), post.currentUserReaction?.id != reactionId {
+                    playReactionDestinationFeedback(forPostId: post.id)
+                }
             } catch {
                 debugLog("didTapReaction 发生错误: \(error)")
                 presentChallengePromptIfNeeded(error: error, on: api)
@@ -403,7 +409,10 @@ extension RepliesViewController: PostCellDelegate {
                 } else {
                     try await api.unlikePost(postId: post.id)
                 }
-                await refreshPost(id: post.id)
+                playReactionSuccessFeedback(forPostId: post.id, animated: liked)
+                if await refreshPost(id: post.id), liked {
+                    playReactionDestinationFeedback(forPostId: post.id)
+                }
             } catch {
                 presentChallengePromptIfNeeded(error: error, on: api)
             }
@@ -411,9 +420,27 @@ extension RepliesViewController: PostCellDelegate {
     }
 
     /// Re-fetch a single post and reconfigure its row.
-    private func refreshPost(id: Int) async {
-        guard let fresh = try? await api.fetchPost(id: id) else { return }
-        guard let index = replies.firstIndex(where: { $0.id == id }) else { return }
+    private func playReactionSuccessFeedback(forPostId postId: Int, animated: Bool) {
+        guard let indexPath = dataSource.indexPath(for: .post(postId)) else {
+            if animated { ReactionFeedback.play(from: nil) }
+            return
+        }
+        let cell = tableView.cellForRow(at: indexPath) as? PostNativeCell
+        if let cell {
+            cell.playReactionSuccessFeedback(animated: animated)
+        } else if animated {
+            ReactionFeedback.play(from: nil)
+        }
+    }
+
+    private func playReactionDestinationFeedback(forPostId postId: Int) {
+        guard let indexPath = dataSource.indexPath(for: .post(postId)) else { return }
+        (tableView.cellForRow(at: indexPath) as? PostNativeCell)?.playReactionDestinationFeedback()
+    }
+
+    private func refreshPost(id: Int) async -> Bool {
+        guard let fresh = try? await api.fetchPost(id: id) else { return false }
+        guard let index = replies.firstIndex(where: { $0.id == id }) else { return false }
         let existing = replies[index]
         let cookedChanged = existing.cooked != fresh.cooked
         // Carry over plugin-only fields stripped by /posts/{id}.json so the
@@ -433,6 +460,7 @@ extension RepliesViewController: PostCellDelegate {
             snapshot.reconfigureItems([item])
             await dataSource.apply(snapshot, animatingDifferences: false)
         }
+        return true
     }
 
     func postCell(didTapBoostForPost post: DiscourseTopicDetail.Post) {
