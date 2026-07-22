@@ -1432,6 +1432,54 @@
         }
       }
     },
+    "forum.empty.add" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Forum"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加论坛"
+          }
+        }
+      }
+    },
+    "forum.empty.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a Discourse forum to start browsing."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加一个 Discourse 论坛以开始浏览。"
+          }
+        }
+      }
+    },
+    "forum.empty.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Forums Yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未添加论坛"
+          }
+        }
+      }
+    },
     "forum.https_upgrade.action" : {
       "localizations" : {
         "en" : {
@@ -5187,6 +5235,7 @@
       }
     },
     "settings.topic_rendering" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5203,6 +5252,7 @@
       }
     },
     "settings.topic_rendering.hint" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5219,6 +5269,7 @@
       }
     },
     "settings.topic_rendering.legacy" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5235,6 +5286,7 @@
       }
     },
     "settings.topic_rendering.virtualized" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

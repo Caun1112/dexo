@@ -42,9 +42,9 @@ extension UIViewController {
 }
 
 /// Presents linux.do's `/challenge` page in a WKWebView seeded with the user's
-/// existing web-login cookies. On dismiss (or each navigation completion), the
-/// updated cookies are synced back into `WebCookieStore` so subsequent API
-/// requests use the refreshed session.
+/// existing web-login cookies. Cookie changes are synced immediately, with a
+/// final sync on every dismissal path, so subsequent API requests use the
+/// refreshed session even when the challenge completes without a navigation.
 final class ChallengeViewController: BaseViewController {
     private let targetURL: URL
     private let userAgent: String?
@@ -52,6 +52,8 @@ final class ChallengeViewController: BaseViewController {
     private var webView: WKWebView?
     private var proxyLease: AnyObject?
     private var setupTask: Task<Void, Never>?
+    private var isFinalCookieSyncInProgress = false
+    private var isObservingCookieChanges = false
 
     private func makeWebViewConfiguration() async throws -> (WKWebViewConfiguration, AnyObject?) {
         let config = WKWebViewConfiguration()
@@ -145,6 +147,8 @@ final class ChallengeViewController: BaseViewController {
 
             await seedCookies(in: webView)
             guard !Task.isCancelled else { return }
+            webView.configuration.websiteDataStore.httpCookieStore.add(coordinator)
+            isObservingCookieChanges = true
             webView.load(URLRequest(url: targetURL))
         } catch {
             guard !Task.isCancelled else { return }
@@ -187,7 +191,10 @@ final class ChallengeViewController: BaseViewController {
     @MainActor
     private func syncWebSession() async {
         guard let webView else { return }
-        await WebCookieStore.shared.syncFromWebView(webView.configuration.websiteDataStore)
+        await WebCookieStore.shared.syncFromWebView(
+            webView.configuration.websiteDataStore,
+            for: targetURL
+        )
 
         // Cloudflare clearance can be tied to the browser User-Agent. Keep
         // the API request consistent with the WKWebView that passed the
@@ -202,13 +209,38 @@ final class ChallengeViewController: BaseViewController {
 
     @objc private func cancelTapped() {
         setupTask?.cancel()
-        dismiss(animated: true)
+        syncAndDismiss()
     }
 
     @objc private func doneTapped() {
+        syncAndDismiss()
+    }
+
+    private func syncAndDismiss() {
+        guard !isFinalCookieSyncInProgress else { return }
+        isFinalCookieSyncInProgress = true
         Task { @MainActor in
             await syncWebSession()
             dismiss(animated: true)
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Also cover an interactive sheet dismissal. Keep a strong Task
+        // capture until WebKit has returned its latest cookie snapshot.
+        if !isFinalCookieSyncInProgress,
+           isBeingDismissed || navigationController?.isBeingDismissed == true
+        {
+            syncCookies()
+        }
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if view.window == nil, isObservingCookieChanges {
+            webView?.configuration.websiteDataStore.httpCookieStore.remove(coordinator)
+            isObservingCookieChanges = false
         }
     }
 
@@ -221,7 +253,7 @@ final class ChallengeViewController: BaseViewController {
         presenter.present(nav, animated: true)
     }
 
-    private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver {
         private let onNavigationFinished: () -> Void
         private let trustEvaluator: WebViewProxyTrustEvaluator?
 
@@ -246,6 +278,10 @@ final class ChallengeViewController: BaseViewController {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            onNavigationFinished()
+        }
+
+        func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
             onNavigationFinished()
         }
 

@@ -69,11 +69,30 @@ final class WebCookieStore {
     }
 
     @MainActor
-    func syncFromWebView(_ dataStore: WKWebsiteDataStore) async {
+    func syncFromWebView(_ dataStore: WKWebsiteDataStore, for url: URL) async {
         let cookies = await withCheckedContinuation { cont in
             dataStore.httpCookieStore.getAllCookies { cont.resume(returning: $0) }
         }
-        setCookies(cookies)
+        guard let host = url.host?.lowercased() else { return }
+
+        // Treat WebKit as authoritative for this forum. A challenge may
+        // delete or rotate cf_clearance without returning the expired cookie
+        // from getAllCookies; merge-only syncing would leave that stale value
+        // in the native jar and send it again on the next topic request.
+        let now = Date()
+        let currentForumCookies = cookies.filter {
+            Self.cookieDomain($0.domain, matchesHost: host)
+                && ($0.expiresDate.map { $0 > now } ?? true)
+        }
+        lock.lock()
+        jar = jar.filter { _, cookie in
+            !Self.cookieDomain(cookie.domain, matchesHost: host)
+        }
+        for cookie in currentForumCookies {
+            jar[key(for: cookie)] = cookie
+        }
+        lock.unlock()
+        save()
     }
 
     func clearAll() {

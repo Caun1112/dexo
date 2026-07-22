@@ -307,6 +307,23 @@ extension RepliesViewController: PostCellDelegate {
     }
 
     func postCell(didTapLinkURL url: URL) {
+        openLink(url)
+    }
+
+    private func openLink(_ url: URL) {
+        if let route = ForumTopicLinkParser.parse(url, baseURL: baseURL) {
+            let detail = TopicDetailControllerFactory.make(
+                api: api,
+                topicId: route.topicId,
+                initialFloor: route.floor
+            )
+            if let navigationController {
+                navigationController.pushViewController(detail, animated: true)
+            } else {
+                present(UINavigationController(rootViewController: detail), animated: true)
+            }
+            return
+        }
         openExternalURL(url)
     }
 

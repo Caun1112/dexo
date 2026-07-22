@@ -6,12 +6,7 @@ import UIKit
 
 enum TopicDetailControllerFactory {
     static func make(api: DiscourseAPI, topicId: Int, initialFloor: Int? = nil) -> UIViewController {
-        switch AppSettings.shared.topicRenderingMode {
-        case .virtualized:
-            return VirtualizedTopicDetailViewController(api: api, topicId: topicId, initialFloor: initialFloor)
-        case .legacy:
-            return LegacyTopicDetailViewController(api: api, topicId: topicId, initialFloor: initialFloor)
-        }
+        VirtualizedTopicDetailViewController(api: api, topicId: topicId, initialFloor: initialFloor)
     }
 }
 

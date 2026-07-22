@@ -51,19 +51,20 @@ final class PushNotificationSettingsViewController: BaseViewController {
 
     @objc private func switchChanged(_ sender: UISwitch) {
         guard !isBusy else { return }
+        let targetEnabled = sender.isOn
         isBusy = true
         tableView.reloadData()
         Task { [weak self] in
             guard let self else { return }
             do {
-                if sender.isOn {
+                if targetEnabled {
                     try await coordinator.enable(username: username)
                 } else {
                     try await coordinator.disable(username: username)
                 }
-                enabled = sender.isOn
+                enabled = targetEnabled
             } catch {
-                enabled = !sender.isOn
+                enabled = coordinator.isEnabled(username: username)
                 showError(error)
             }
             isBusy = false
@@ -94,11 +95,18 @@ extension PushNotificationSettingsViewController: UITableViewDataSource {
         content.image = UIImage(systemName: "bell.badge")
         content.imageProperties.tintColor = ThemeManager.shared.accentColor
         cell.contentConfiguration = content
-        let toggle = UISwitch()
-        toggle.isOn = enabled
-        toggle.isEnabled = !isBusy
-        toggle.addTarget(self, action: #selector(switchChanged(_:)), for: .valueChanged)
-        cell.accessoryView = toggle
+        if isBusy {
+            let indicator = UIActivityIndicatorView(style: .medium)
+            indicator.frame = CGRect(x: 0, y: 0, width: 32, height: 32)
+            indicator.color = ThemeManager.shared.accentColor
+            indicator.startAnimating()
+            cell.accessoryView = indicator
+        } else {
+            let toggle = UISwitch()
+            toggle.isOn = enabled
+            toggle.addTarget(self, action: #selector(switchChanged(_:)), for: .valueChanged)
+            cell.accessoryView = toggle
+        }
         cell.selectionStyle = .none
         return cell
     }

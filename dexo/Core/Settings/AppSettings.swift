@@ -160,26 +160,6 @@ final class AppSettings {
 
     // MARK: - Boost Display
 
-    enum TopicRenderingMode: Int, CaseIterable {
-        case virtualized = 0
-        case legacy = 1
-
-        var title: String {
-            switch self {
-            case .virtualized: return String(localized: "settings.topic_rendering.virtualized")
-            case .legacy: return String(localized: "settings.topic_rendering.legacy")
-            }
-        }
-    }
-
-    /// New installs use block-level virtualization. The preference is read
-    /// when a topic controller is created; changing it never hot-swaps an open
-    /// detail screen.
-    var topicRenderingMode: TopicRenderingMode {
-        get { TopicRenderingMode(rawValue: defaults.integer(forKey: "topicRenderingMode")) ?? .virtualized }
-        set { defaults.set(newValue.rawValue, forKey: "topicRenderingMode") }
-    }
-
     enum BoostDisplayMode: Int, CaseIterable {
         case danmaku = 0
         case expand = 1

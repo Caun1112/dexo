@@ -26,10 +26,20 @@ final class SettingsViewController: ObservableViewController {
         ])
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        reloadNetworkSection()
+    }
+
     override func updateUI() {
         // Read FontManager.revision so @Observable tracking triggers
         // a reload when font size changes.
         _ = FontManager.shared.scale
+        // DoH is edited by a pushed child controller. Track its backing values
+        // explicitly so the root subtitle is refreshed as soon as they change.
+        _ = settings.dohEnabled
+        _ = settings.dohServers
+        _ = settings.defaultDoHServerID
         tableView.reloadData()
     }
 
@@ -90,7 +100,7 @@ extension SettingsViewController: UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch visibleSections[section] {
-        case .general: return 3
+        case .general: return 2
         case .appearance: return AppearanceRow.allCases.count
         case .storage: return 1
         case .about: return 1
@@ -132,10 +142,8 @@ extension SettingsViewController: UITableViewDataSource {
         case .general:
             if indexPath.row == 0 {
                 return makeAutoOpenCell(tableView, indexPath: indexPath)
-            } else if indexPath.row == 1 {
-                return makeBoostDisplayCell(tableView, indexPath: indexPath)
             } else {
-                return makeTopicRenderingCell(tableView, indexPath: indexPath)
+                return makeBoostDisplayCell(tableView, indexPath: indexPath)
             }
         case .appearance:
             switch AppearanceRow(rawValue: indexPath.row)! {
@@ -246,15 +254,6 @@ extension SettingsViewController: UITableViewDataSource {
         return cell
     }
 
-    private func makeTopicRenderingCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
-        applyFonts(to: cell)
-        cell.textLabel?.text = String(localized: "settings.topic_rendering")
-        cell.detailTextLabel?.text = settings.topicRenderingMode.title
-        cell.accessoryType = .disclosureIndicator
-        return cell
-    }
-
     private func makeDoHSettingsCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
         applyFonts(to: cell)
@@ -350,8 +349,6 @@ extension SettingsViewController: UITableViewDelegate {
         case .general:
             if indexPath.row == 1 {
                 showBoostDisplayPicker(from: sourceView)
-            } else if indexPath.row == 2 {
-                showTopicRenderingPicker(from: sourceView)
             }
         case .appearance:
             switch AppearanceRow(rawValue: indexPath.row)! {
@@ -418,6 +415,13 @@ extension SettingsViewController {
         }
     }
 
+    private func reloadNetworkSection() {
+        guard isViewLoaded,
+              let index = visibleSections.firstIndex(of: .network)
+        else { return }
+        tableView.reloadSections(IndexSet(integer: index), with: .none)
+    }
+
     private func showAppearancePicker(from sourceView: UIView?) {
         let alert = UIAlertController(title: String(localized: "settings.dark_mode"), message: nil, preferredStyle: .actionSheet)
         for mode in AppSettings.AppearanceMode.allCases {
@@ -445,29 +449,6 @@ extension SettingsViewController {
                 }
             }
             if mode == settings.boostDisplayMode {
-                action.setValue(true, forKey: "checked")
-            }
-            alert.addAction(action)
-        }
-        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
-        Self.anchorPopover(alert, to: sourceView)
-        present(alert, animated: true)
-    }
-
-    private func showTopicRenderingPicker(from sourceView: UIView?) {
-        let alert = UIAlertController(
-            title: String(localized: "settings.topic_rendering"),
-            message: String(localized: "settings.topic_rendering.hint"),
-            preferredStyle: .actionSheet
-        )
-        for mode in AppSettings.TopicRenderingMode.allCases {
-            let action = UIAlertAction(title: mode.title, style: .default) { [weak self] _ in
-                self?.settings.topicRenderingMode = mode
-                if let idx = self?.visibleSections.firstIndex(of: .general) {
-                    self?.tableView.reloadSections(IndexSet(integer: idx), with: .none)
-                }
-            }
-            if mode == settings.topicRenderingMode {
                 action.setValue(true, forKey: "checked")
             }
             alert.addAction(action)

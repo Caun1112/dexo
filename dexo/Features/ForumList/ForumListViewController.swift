@@ -7,6 +7,67 @@ final class ForumListViewController: ObservableViewController {
     private let settings = AppSettings.shared
     private var hasAttemptedAutoOpen = false
 
+    private let emptyStateImageView: UIImageView = {
+        let imageView = UIImageView(image: UIImage(systemName: "rectangle.stack.badge.plus"))
+        imageView.contentMode = .scaleAspectFit
+        imageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 46, weight: .regular)
+        return imageView
+    }()
+
+    private let emptyStateTitleLabel: UILabel = {
+        let label = UILabel()
+        label.text = String(localized: "forum.empty.title")
+        label.textAlignment = .center
+        return label
+    }()
+
+    private let emptyStateMessageLabel: UILabel = {
+        let label = UILabel()
+        label.text = String(localized: "forum.empty.message")
+        label.textAlignment = .center
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 0
+        return label
+    }()
+
+    private lazy var emptyStateButton: UIButton = {
+        var configuration = UIButton.Configuration.filled()
+        configuration.title = String(localized: "forum.empty.add")
+        configuration.image = UIImage(systemName: "plus")
+        configuration.imagePadding = 6
+        configuration.cornerStyle = .capsule
+        let button = UIButton(configuration: configuration)
+        button.addTarget(self, action: #selector(addForumTapped), for: .touchUpInside)
+        return button
+    }()
+
+    private lazy var emptyStateView: UIView = {
+        let container = UIView()
+        let stack = UIStackView(arrangedSubviews: [
+            emptyStateImageView,
+            emptyStateTitleLabel,
+            emptyStateMessageLabel,
+            emptyStateButton,
+        ])
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 12
+        stack.setCustomSpacing(20, after: emptyStateMessageLabel)
+        container.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            emptyStateImageView.widthAnchor.constraint(equalToConstant: 64),
+            emptyStateImageView.heightAnchor.constraint(equalToConstant: 64),
+            emptyStateMessageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 320),
+            stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -24),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+        ])
+        return container
+    }()
+
     private lazy var tableView: UITableView = {
         let tv = ThemedTableView(frame: .zero, style: .insetGrouped)
         tv.translatesAutoresizingMaskIntoConstraints = false
@@ -64,6 +125,8 @@ final class ForumListViewController: ObservableViewController {
     }
 
     override func updateUI() {
+        _ = FontManager.shared.scale
+        _ = ThemeManager.shared.revision
         var snapshot = NSDiffableDataSourceSnapshot<Int, Int64>()
         snapshot.appendSections([0])
         let ids = viewModel.forums.compactMap(\.id)
@@ -74,6 +137,24 @@ final class ForumListViewController: ObservableViewController {
             snapshot.reconfigureItems(idsToRefresh)
         }
         dataSource.apply(snapshot, animatingDifferences: true)
+
+        let showsEmptyState = ids.isEmpty && !viewModel.isLoading
+        if showsEmptyState, tableView.backgroundView !== emptyStateView {
+            tableView.backgroundView = emptyStateView
+        } else if !showsEmptyState, tableView.backgroundView != nil {
+            tableView.backgroundView = nil
+        }
+        editButtonItem.isEnabled = !ids.isEmpty
+        if ids.isEmpty, isEditing {
+            setEditing(false, animated: true)
+        }
+
+        emptyStateImageView.tintColor = ThemeManager.shared.accentColor
+        emptyStateTitleLabel.font = FontManager.shared.font(size: 22, weight: .semibold)
+        emptyStateMessageLabel.font = FontManager.shared.font(size: 15)
+        var buttonConfiguration = emptyStateButton.configuration
+        buttonConfiguration?.baseBackgroundColor = ThemeManager.shared.accentColor
+        emptyStateButton.configuration = buttonConfiguration
     }
 
     override func setEditing(_ editing: Bool, animated: Bool) {
