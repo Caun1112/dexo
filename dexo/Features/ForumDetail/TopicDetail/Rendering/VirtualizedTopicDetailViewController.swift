@@ -1494,9 +1494,13 @@ private extension VirtualizedTopicDetailViewController {
             return
         }
 
-        if let linkedTopicId = topicId(from: url) {
+        if let route = ForumTopicLinkParser.parse(url, baseURL: baseURL) {
             navigationController?.pushViewController(
-                TopicDetailControllerFactory.make(api: api, topicId: linkedTopicId),
+                TopicDetailControllerFactory.make(
+                    api: api,
+                    topicId: route.topicId,
+                    initialFloor: route.floor
+                ),
                 animated: true
             )
         } else if let (slug, id) = categoryInfo(from: url) {
@@ -1515,11 +1519,6 @@ private extension VirtualizedTopicDetailViewController {
         } else {
             present(SFSafariViewController(url: url), animated: true)
         }
-    }
-
-    func topicId(from url: URL) -> Int? {
-        guard let index = url.pathComponents.firstIndex(of: "t") else { return nil }
-        return url.pathComponents.dropFirst(index + 1).compactMap(Int.init).first
     }
 
     func categoryInfo(from url: URL) -> (String, Int)? {

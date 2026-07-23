@@ -2,3 +2,4 @@ What to Test
 
 - React to a post and confirm the feedback feels quick and clear. Tap again to remove the reaction and confirm it stays quiet.
 - Open an image in a post, then pull down to close it and confirm the gesture feels natural.
+- Tap an in-forum topic link to a specific post from within a post, and confirm the topic opens directly at that post.

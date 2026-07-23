@@ -1592,8 +1592,12 @@ final class LegacyTopicDetailViewController: ObservableViewController {
         }
 
         if linkHost == baseHost {
-            if let topicId = parseTopicId(from: url) {
-                let detailVC = TopicDetailControllerFactory.make(api: api, topicId: topicId)
+            if let route = ForumTopicLinkParser.parse(url, baseURL: baseURL) {
+                let detailVC = TopicDetailControllerFactory.make(
+                    api: api,
+                    topicId: route.topicId,
+                    initialFloor: route.floor
+                )
                 navigationController?.pushViewController(detailVC, animated: true)
             } else if let (slug, categoryId) = parseCategoryInfo(from: url) {
                 let category = DiscourseCategory(id: categoryId, name: slug, slug: slug)
@@ -1621,17 +1625,6 @@ final class LegacyTopicDetailViewController: ObservableViewController {
     private func presentSafari(_ url: URL) {
         let safari = SFSafariViewController(url: url)
         present(safari, animated: true)
-    }
-
-    private func parseTopicId(from url: URL) -> Int? {
-        let components = url.pathComponents
-        guard let tIndex = components.firstIndex(of: "t") else { return nil }
-        for i in (tIndex + 1)..<components.count {
-            if let id = Int(components[i]) {
-                return id
-            }
-        }
-        return nil
     }
 
     private func parseCategoryInfo(from url: URL) -> (slug: String, id: Int)? {
