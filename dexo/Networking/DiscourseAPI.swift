@@ -585,13 +585,13 @@ final class DiscourseAPI {
         let _: [String: String] = try await request(route: .unfollowUser(username: username))
     }
 
-    func fetchCustomEmojis() async -> [DiscourseCustomEmoji] {
-        // Ensure emoji map is loaded from /emojis.json
-        if !emojiReady {
+    func fetchEmojiCatalog() async -> [DiscourseEmojiGroup] {
+        // Ensure the grouped emoji catalog for this forum is loaded.
+        if !emojiReady || EmojiStore.loadedBaseURL != baseURL {
             await loadOrFetchEmojiMap()
         }
-        return EmojiStore.lookupMap.map { DiscourseCustomEmoji(name: $0.key, url: $0.value) }
-            .sorted { $0.name < $1.name }
+        guard EmojiStore.loadedBaseURL == baseURL else { return [] }
+        return EmojiStore.catalogGroups()
     }
 
     func search(term: String, page: Int = 0) async throws -> DiscourseSearchResult {
@@ -1019,8 +1019,7 @@ final class DiscourseAPI {
         }
         do {
             let groups: [String: [DiscourseEmojiEntry]] = try await request(route: .emojis)
-            let entries = groups.values.flatMap { $0 }
-            EmojiStore.save(entries, for: baseURL, assetBaseURL: assetBaseURL)
+            EmojiStore.save(groups, for: baseURL, assetBaseURL: assetBaseURL)
             emojiReady = true
         } catch {
             // Silent failure — reactions won't show emoji images but functionality is unaffected

@@ -5,14 +5,44 @@ struct DiscourseCustomEmoji: Decodable {
     let url: String
 }
 
-struct DiscourseEmojiEntry: Codable {
+struct DiscourseEmojiGroup: Hashable {
+    let id: String
+    let emojis: [DiscourseEmojiEntry]
+}
+
+struct DiscourseEmojiEntry: Codable, Hashable {
     let name: String
     let url: String
     let searchAliases: [String]?
+    let group: String?
+    let tonable: Bool
 
     enum CodingKeys: String, CodingKey {
-        case name, url
+        case name, url, group, tonable
         case searchAliases = "search_aliases"
+    }
+
+    init(
+        name: String,
+        url: String,
+        searchAliases: [String]? = nil,
+        group: String? = nil,
+        tonable: Bool = false
+    ) {
+        self.name = name
+        self.url = url
+        self.searchAliases = searchAliases
+        self.group = group
+        self.tonable = tonable
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        url = try container.decode(String.self, forKey: .url)
+        searchAliases = try container.decodeIfPresent([String].self, forKey: .searchAliases)
+        group = try container.decodeIfPresent(String.self, forKey: .group)
+        tonable = try container.decodeIfPresent(Bool.self, forKey: .tonable) ?? false
     }
 }
 

@@ -15,7 +15,7 @@ final class MessageComposerViewController: BaseViewController {
     var onSent: (() -> Void)?
 
     private var isEmojiPickerVisible = false
-    private var hasLoadedCustomEmojis = false
+    private var hasLoadedEmojiCatalog = false
 
     // MARK: - UI
 
@@ -64,10 +64,25 @@ final class MessageComposerViewController: BaseViewController {
     }()
 
     private lazy var emojiPickerInputView: EmojiPickerView = {
-        let picker = EmojiPickerView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 260))
+        let picker = EmojiPickerView(
+            forumIdentifier: api.baseURL,
+            frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 300)
+        )
         picker.autoresizingMask = .flexibleWidth
         picker.onEmojiSelected = { [weak self] emoji in
             self?.insertText(emoji)
+        }
+        picker.onDeleteBackward = { [weak self] in
+            self?.bodyTextView.deleteBackward()
+        }
+        picker.onPresentSearch = { [weak self] controller in
+            self?.present(controller, animated: true)
+        }
+        picker.onSearchFinished = { [weak self] in
+            guard let self, self.isEmojiPickerVisible else { return }
+            self.bodyTextView.inputView = self.emojiPickerInputView
+            self.bodyTextView.reloadInputViews()
+            self.bodyTextView.becomeFirstResponder()
         }
         return picker
     }()
@@ -341,7 +356,7 @@ final class MessageComposerViewController: BaseViewController {
         isEmojiPickerVisible.toggle()
         if isEmojiPickerVisible {
             bodyTextView.inputView = emojiPickerInputView
-            loadCustomEmojis()
+            loadEmojiCatalog()
         } else {
             bodyTextView.inputView = nil
         }
@@ -352,13 +367,13 @@ final class MessageComposerViewController: BaseViewController {
         }
     }
 
-    private func loadCustomEmojis() {
-        guard !hasLoadedCustomEmojis else { return }
-        hasLoadedCustomEmojis = true
+    private func loadEmojiCatalog() {
+        guard !hasLoadedEmojiCatalog else { return }
+        hasLoadedEmojiCatalog = true
         emojiPickerInputView.showLoading()
         Task {
-            let emojis = await api.fetchCustomEmojis()
-            emojiPickerInputView.setCustomEmojis(emojis)
+            let groups = await api.fetchEmojiCatalog()
+            emojiPickerInputView.setEmojiCatalog(groups)
         }
     }
 
