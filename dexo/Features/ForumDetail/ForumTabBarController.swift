@@ -20,6 +20,9 @@ final class ForumTabBarController: UITabBarController, UITabBarControllerDelegat
     override func viewDidLoad() {
         super.viewDidLoad()
         delegate = self
+        if #available(iOS 26.0, *) {
+            tabBarMinimizeBehavior = .onScrollDown
+        }
 
         let homeVC = HomeViewController(api: api, authGate: authGate)
         let homeNav = UINavigationController(rootViewController: homeVC)
