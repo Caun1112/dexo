@@ -747,6 +747,54 @@ final class DiscourseAPI {
         }
     }
 
+    /// The solved endpoint returns the complete accepted-answer array on
+    /// modern Discourse. Older plugin versions return only `{ success: "OK" }`;
+    /// `nil` lets the caller apply a compatible optimistic fallback.
+    func acceptSolution(postId: Int) async throws -> [DiscourseTopicDetail.AcceptedAnswer]? {
+        let response: SolutionMutationResponse = try await request(
+            route: .acceptSolution,
+            parameters: ["id": postId],
+            encoding: URLEncoding.httpBody,
+            headers: ["X-Requested-With": "XMLHttpRequest"]
+        )
+        return response.acceptedAnswers
+    }
+
+    func unacceptSolution(postId: Int) async throws -> [DiscourseTopicDetail.AcceptedAnswer]? {
+        let response: SolutionMutationResponse = try await request(
+            route: .unacceptSolution,
+            parameters: ["id": postId],
+            encoding: URLEncoding.httpBody,
+            headers: ["X-Requested-With": "XMLHttpRequest"]
+        )
+        return response.acceptedAnswers
+    }
+
+    private struct SolutionMutationResponse: Decodable {
+        let acceptedAnswers: [DiscourseTopicDetail.AcceptedAnswer]?
+
+        private enum CodingKeys: String, CodingKey {
+            case acceptedAnswers = "accepted_answers"
+        }
+
+        init(from decoder: Decoder) throws {
+            let single = try decoder.singleValueContainer()
+            if single.decodeNil() {
+                acceptedAnswers = []
+            } else if let answers = try? single.decode([DiscourseTopicDetail.AcceptedAnswer].self) {
+                acceptedAnswers = answers
+            } else if let envelope = try? decoder.container(keyedBy: CodingKeys.self) {
+                acceptedAnswers = try? envelope.decodeIfPresent(
+                    [DiscourseTopicDetail.AcceptedAnswer].self,
+                    forKey: .acceptedAnswers
+                )
+            } else {
+                // Legacy `{ success: "OK" }` response.
+                acceptedAnswers = nil
+            }
+        }
+    }
+
     struct PollVoteResponse: Decodable {
         let poll: DiscourseTopicDetail.Poll
         let vote: [String]?

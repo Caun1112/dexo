@@ -361,10 +361,11 @@ final class TopicDetailViewModel {
     /// archetypes that aren't tree-rendered). We populate the same state
     /// `loadTopic` would have and flip `isTreeMode` off so the UI follows.
     private func ingestFlatTopic(
-        _ detail: DiscourseTopicDetail,
+        _ response: DiscourseTopicDetail,
         containerWidth: CGFloat,
         expectedGeneration: UInt
     ) async {
+        let detail = topicWithSynchronizedSolutionState(response)
         isTreeMode = false
         topic = detail
         recordLocalReadIfNeeded(detail)
@@ -389,6 +390,26 @@ final class TopicDetailViewModel {
         guard loadGeneration == expectedGeneration else { return }
         if isReady { isReady = false }
         isReady = true
+    }
+
+    /// Some solved-plugin versions expose the accepted answer only through the
+    /// topic-level summary. Mirror that canonical metadata onto the loaded
+    /// posts so the accepted reply is styled consistently across versions.
+    private func topicWithSynchronizedSolutionState(
+        _ response: DiscourseTopicDetail
+    ) -> DiscourseTopicDetail {
+        var detail = response
+        let acceptedPostNumbers = Set(detail.acceptedAnswers.map(\.postNumber))
+        for index in detail.postStream.posts.indices {
+            if !acceptedPostNumbers.isEmpty {
+                detail.postStream.posts[index].acceptedAnswer = acceptedPostNumbers.contains(
+                    detail.postStream.posts[index].postNumber
+                )
+            }
+            detail.postStream.posts[index].topicAcceptedAnswer =
+                detail.hasAcceptedAnswer || detail.postStream.posts[index].topicAcceptedAnswer
+        }
+        return detail
     }
 
     /// Recursively collect every post in the nested tree into `postsById` and
@@ -583,6 +604,7 @@ final class TopicDetailViewModel {
     /// flat path has.
     func loadNestedTopic(id: Int, sort: String? = nil, containerWidth: CGFloat? = nil) async {
         let effectiveSort = sort ?? treeSort
+        let existingTopic = topic?.id == id ? topic : nil
         isLoading = true
         isReady = false
         errorMessage = nil
@@ -648,6 +670,21 @@ final class TopicDetailViewModel {
             await parseAndStore(posts: postsToParse, expectedGeneration: expectedGeneration)
             guard loadGeneration == expectedGeneration else { return }
 
+            let derivedAcceptedAnswers = postsToParse
+                .filter(\.acceptedAnswer)
+                .sorted { $0.postNumber < $1.postNumber }
+                .map { DiscourseTopicDetail.AcceptedAnswer(post: $0) }
+            let acceptedAnswers =
+                response.acceptedAnswers
+                ?? topicMeta.acceptedAnswers
+                ?? existingTopic?.acceptedAnswers
+                ?? derivedAcceptedAnswers
+            let hasAcceptedAnswer =
+                response.hasAcceptedAnswer
+                ?? topicMeta.hasAcceptedAnswer
+                ?? existingTopic?.hasAcceptedAnswer
+                ?? !acceptedAnswers.isEmpty
+
             // Synthesize a topic object so consumers that read tags / titles
             // off `viewModel.topic` keep working. `validReactions` isn't on
             // this endpoint — leave it empty in tree mode for now; reactions
@@ -665,7 +702,9 @@ final class TopicDetailViewModel {
                     posts: Array(postsById.values),
                     stream: nil
                 ),
-                validReactions: topic?.validReactions ?? [],
+                validReactions: existingTopic?.validReactions ?? [],
+                acceptedAnswers: acceptedAnswers,
+                hasAcceptedAnswer: hasAcceptedAnswer,
                 lastReadPostNumber: nil,
                 archetype: topicMeta.archetype
             )
@@ -878,8 +917,9 @@ final class TopicDetailViewModel {
         }
         let filter = isSummaryMode ? "summary" : nil
         do {
-            let detail = try await api.fetchTopic(id: id, nearPostNumber: nearPostNumber, filter: filter)
+            let response = try await api.fetchTopic(id: id, nearPostNumber: nearPostNumber, filter: filter)
             guard loadGeneration == expectedGeneration else { return }
+            let detail = topicWithSynchronizedSolutionState(response)
             topic = detail
             recordLocalReadIfNeeded(detail)
 
@@ -1224,6 +1264,102 @@ final class TopicDetailViewModel {
         if cookedChanged {
             await parseAndStore(posts: [merged])
         }
+    }
+
+    /// Applies the canonical accepted-answer list returned by Discourse to
+    /// every in-memory representation of a post. Tree mode keeps both a nested
+    /// graph and id-keyed bare copies, so updating only `topic.postStream`
+    /// would leave visible cells stale.
+    func applySolutionMutation(
+        postId: Int,
+        accepting: Bool,
+        acceptedAnswers serverAnswers: [DiscourseTopicDetail.AcceptedAnswer]?
+    ) {
+        guard var topic else { return }
+        let target =
+            postsById[postId]
+            ?? topic.postStream.posts.first(where: { $0.id == postId })
+
+        let acceptedAnswers: [DiscourseTopicDetail.AcceptedAnswer]
+        if let serverAnswers {
+            acceptedAnswers = serverAnswers
+        } else if accepting, let target {
+            // Pre-multi-solution plugin versions return only `{success:"OK"}`.
+            acceptedAnswers = [DiscourseTopicDetail.AcceptedAnswer(post: target)]
+        } else {
+            acceptedAnswers = topic.acceptedAnswers.filter {
+                $0.id != postId && $0.postNumber != target?.postNumber
+            }
+        }
+
+        let acceptedPostNumbers = Set(acceptedAnswers.map(\.postNumber))
+        let topicHasAcceptedAnswer = !acceptedPostNumbers.isEmpty
+
+        topic.acceptedAnswers = acceptedAnswers
+        topic.hasAcceptedAnswer = topicHasAcceptedAnswer
+        for index in topic.postStream.posts.indices {
+            applySolutionState(
+                to: &topic.postStream.posts[index],
+                acceptedPostNumbers: acceptedPostNumbers,
+                topicHasAcceptedAnswer: topicHasAcceptedAnswer
+            )
+        }
+        self.topic = topic
+
+        for id in Array(postsById.keys) {
+            guard var post = postsById[id] else { continue }
+            applySolutionState(
+                to: &post,
+                acceptedPostNumbers: acceptedPostNumbers,
+                topicHasAcceptedAnswer: topicHasAcceptedAnswer
+            )
+            postsById[id] = post
+        }
+
+        if var opPost = nestedTreeOpPost {
+            applySolutionState(
+                to: &opPost,
+                acceptedPostNumbers: acceptedPostNumbers,
+                topicHasAcceptedAnswer: topicHasAcceptedAnswer
+            )
+            nestedTreeOpPost = opPost
+        }
+        if var roots = nestedTreeRoots {
+            for index in roots.indices {
+                applySolutionState(
+                    to: &roots[index],
+                    acceptedPostNumbers: acceptedPostNumbers,
+                    topicHasAcceptedAnswer: topicHasAcceptedAnswer
+                )
+            }
+            nestedTreeRoots = roots
+        }
+        if var cachedFirstPost = firstPost {
+            applySolutionState(
+                to: &cachedFirstPost,
+                acceptedPostNumbers: acceptedPostNumbers,
+                topicHasAcceptedAnswer: topicHasAcceptedAnswer
+            )
+            firstPost = cachedFirstPost
+        }
+    }
+
+    private func applySolutionState(
+        to post: inout DiscourseTopicDetail.Post,
+        acceptedPostNumbers: Set<Int>,
+        topicHasAcceptedAnswer: Bool
+    ) {
+        post.acceptedAnswer = acceptedPostNumbers.contains(post.postNumber)
+        post.topicAcceptedAnswer = topicHasAcceptedAnswer
+        guard var children = post.children else { return }
+        for index in children.indices {
+            applySolutionState(
+                to: &children[index],
+                acceptedPostNumbers: acceptedPostNumbers,
+                topicHasAcceptedAnswer: topicHasAcceptedAnswer
+            )
+        }
+        post.children = children
     }
 
     func updatePoll(_ updatedPoll: DiscourseTopicDetail.Poll, votes: [String], forPostId postId: Int, pollName: String) async {

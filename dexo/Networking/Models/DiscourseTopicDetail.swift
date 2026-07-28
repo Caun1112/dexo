@@ -11,6 +11,11 @@ struct DiscourseTopicDetail: Decodable {
     let tags: [Tag]
     var postStream: PostStream
     let validReactions: [String]
+    /// Solved-plugin summaries rendered below the OP. Modern Discourse
+    /// returns an array (and can optionally allow multiple solutions); older
+    /// servers expose one `accepted_answer` object instead.
+    var acceptedAnswers: [AcceptedAnswer]
+    var hasAcceptedAnswer: Bool
     /// Highest post number the authenticated user has read in this topic.
     /// `nil` for anonymous fetches. Used by the jump-to-floor sheet to offer a
     /// "first unread" shortcut.
@@ -26,6 +31,9 @@ struct DiscourseTopicDetail: Decodable {
         case createdAt = "created_at"
         case postStream = "post_stream"
         case validReactions = "valid_reactions"
+        case acceptedAnswers = "accepted_answers"
+        case acceptedAnswer = "accepted_answer"
+        case hasAcceptedAnswer = "has_accepted_answer"
         case lastReadPostNumber = "last_read_post_number"
     }
 
@@ -41,6 +49,16 @@ struct DiscourseTopicDetail: Decodable {
         tags = (try? container.decodeIfPresent([Tag].self, forKey: .tags)) ?? []
         postStream = try container.decode(PostStream.self, forKey: .postStream)
         validReactions = (try? container.decodeIfPresent([String].self, forKey: .validReactions)) ?? []
+        if let answers = try? container.decodeIfPresent([AcceptedAnswer].self, forKey: .acceptedAnswers) {
+            acceptedAnswers = answers
+        } else if let answer = try? container.decodeIfPresent(AcceptedAnswer.self, forKey: .acceptedAnswer) {
+            acceptedAnswers = [answer]
+        } else {
+            acceptedAnswers = []
+        }
+        hasAcceptedAnswer =
+            (try? container.decodeIfPresent(Bool.self, forKey: .hasAcceptedAnswer))
+            ?? !acceptedAnswers.isEmpty
         lastReadPostNumber = try? container.decodeIfPresent(Int.self, forKey: .lastReadPostNumber)
         archetype = try? container.decodeIfPresent(String.self, forKey: .archetype)
     }
@@ -60,6 +78,8 @@ struct DiscourseTopicDetail: Decodable {
         tags: [Tag],
         postStream: PostStream,
         validReactions: [String],
+        acceptedAnswers: [AcceptedAnswer] = [],
+        hasAcceptedAnswer: Bool? = nil,
         lastReadPostNumber: Int?,
         archetype: String? = nil
     ) {
@@ -73,6 +93,8 @@ struct DiscourseTopicDetail: Decodable {
         self.tags = tags
         self.postStream = postStream
         self.validReactions = validReactions
+        self.acceptedAnswers = acceptedAnswers
+        self.hasAcceptedAnswer = hasAcceptedAnswer ?? !acceptedAnswers.isEmpty
         self.lastReadPostNumber = lastReadPostNumber
         self.archetype = archetype
     }
@@ -86,6 +108,64 @@ struct DiscourseTopicDetail: Decodable {
         let id: Int
         let name: String
         let slug: String
+    }
+
+    /// A compact solved-answer entry embedded in a topic response. `cooked`
+    /// is an optional server-configured excerpt, not the authoritative post
+    /// body; selecting the row always jumps to the real post.
+    struct AcceptedAnswer: Decodable {
+        let id: Int?
+        let name: String?
+        let username: String
+        let avatarTemplate: String?
+        let createdAt: String?
+        let cooked: String?
+        let postNumber: Int
+        let topicId: Int?
+        let url: String?
+        let accepterName: String?
+        let accepterUsername: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, username, cooked, url, excerpt
+            case avatarTemplate = "avatar_template"
+            case createdAt = "created_at"
+            case postNumber = "post_number"
+            case topicId = "topic_id"
+            case accepterName = "accepter_name"
+            case accepterUsername = "accepter_username"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try? container.decodeIfPresent(Int.self, forKey: .id)
+            name = try? container.decodeIfPresent(String.self, forKey: .name)
+            username = (try? container.decodeIfPresent(String.self, forKey: .username)) ?? ""
+            avatarTemplate = try? container.decodeIfPresent(String.self, forKey: .avatarTemplate)
+            createdAt = try? container.decodeIfPresent(String.self, forKey: .createdAt)
+            cooked =
+                (try? container.decodeIfPresent(String.self, forKey: .cooked))
+                ?? (try? container.decodeIfPresent(String.self, forKey: .excerpt))
+            postNumber = (try? container.decodeIfPresent(Int.self, forKey: .postNumber)) ?? 0
+            topicId = try? container.decodeIfPresent(Int.self, forKey: .topicId)
+            url = try? container.decodeIfPresent(String.self, forKey: .url)
+            accepterName = try? container.decodeIfPresent(String.self, forKey: .accepterName)
+            accepterUsername = try? container.decodeIfPresent(String.self, forKey: .accepterUsername)
+        }
+
+        init(post: Post) {
+            id = post.id
+            name = post.name
+            username = post.username
+            avatarTemplate = post.avatarTemplate
+            createdAt = post.createdAt
+            cooked = nil
+            postNumber = post.postNumber
+            topicId = nil
+            url = nil
+            accepterName = nil
+            accepterUsername = nil
+        }
     }
 
     struct ReplyToUser: Decodable {
@@ -237,6 +317,10 @@ struct DiscourseTopicDetail: Decodable {
         let currentUserReaction: Reaction?
         let currentUserUsedMainReaction: Bool
         let actionsSummary: [ActionSummary]
+        var acceptedAnswer: Bool
+        var canAcceptAnswer: Bool
+        var canUnacceptAnswer: Bool
+        var topicAcceptedAnswer: Bool
 
         /// Standard Discourse "like" PostAction state (id == 2 in actions_summary).
         var likeAction: ActionSummary? { actionsSummary.first(where: { $0.id == 2 }) }
@@ -290,6 +374,10 @@ struct DiscourseTopicDetail: Decodable {
             case currentUserReaction = "current_user_reaction"
             case currentUserUsedMainReaction = "current_user_used_main_reaction"
             case actionsSummary = "actions_summary"
+            case acceptedAnswer = "accepted_answer"
+            case canAcceptAnswer = "can_accept_answer"
+            case canUnacceptAnswer = "can_unaccept_answer"
+            case topicAcceptedAnswer = "topic_accepted_answer"
             case boosts
             case canBoost = "can_boost"
             case polls
@@ -329,6 +417,10 @@ struct DiscourseTopicDetail: Decodable {
             currentUserReaction = try? container.decodeIfPresent(Reaction.self, forKey: .currentUserReaction)
             currentUserUsedMainReaction = (try? container.decodeIfPresent(Bool.self, forKey: .currentUserUsedMainReaction)) ?? false
             actionsSummary = (try? container.decodeIfPresent([ActionSummary].self, forKey: .actionsSummary)) ?? []
+            acceptedAnswer = (try? container.decodeIfPresent(Bool.self, forKey: .acceptedAnswer)) ?? false
+            canAcceptAnswer = (try? container.decodeIfPresent(Bool.self, forKey: .canAcceptAnswer)) ?? false
+            canUnacceptAnswer = (try? container.decodeIfPresent(Bool.self, forKey: .canUnacceptAnswer)) ?? false
+            topicAcceptedAnswer = (try? container.decodeIfPresent(Bool.self, forKey: .topicAcceptedAnswer)) ?? false
             boosts = (try? container.decodeIfPresent([Boost].self, forKey: .boosts)) ?? []
             canBoost = (try? container.decodeIfPresent(Bool.self, forKey: .canBoost)) ?? false
             polls = (try? container.decodeIfPresent([Poll].self, forKey: .polls)) ?? []
@@ -357,6 +449,8 @@ struct DiscourseNestedTopicResponse: Decodable {
     let topic: NestedTopicMeta?
     let opPost: DiscourseTopicDetail.Post?
     let sort: String?
+    let acceptedAnswers: [DiscourseTopicDetail.AcceptedAnswer]?
+    let hasAcceptedAnswer: Bool?
     /// Set when the server returned the standard flat post-stream layout
     /// in response to `/n/.../json` — e.g. private messages, which bypass
     /// the nested view. The caller should fall back to standard topic
@@ -370,6 +464,8 @@ struct DiscourseNestedTopicResponse: Decodable {
         case topic
         case opPost = "op_post"
         case sort
+        case acceptedAnswers = "accepted_answers"
+        case hasAcceptedAnswer = "has_accepted_answer"
         case postStream = "post_stream"
     }
 
@@ -382,6 +478,8 @@ struct DiscourseNestedTopicResponse: Decodable {
             topic = try? c.decodeIfPresent(NestedTopicMeta.self, forKey: .topic)
             opPost = try? c.decodeIfPresent(DiscourseTopicDetail.Post.self, forKey: .opPost)
             sort = try? c.decodeIfPresent(String.self, forKey: .sort)
+            acceptedAnswers = try? c.decodeIfPresent([DiscourseTopicDetail.AcceptedAnswer].self, forKey: .acceptedAnswers)
+            hasAcceptedAnswer = try? c.decodeIfPresent(Bool.self, forKey: .hasAcceptedAnswer)
             flatTopic = nil
         } else if c.contains(.postStream) {
             // Server returned the standard topic layout — decode it off the
@@ -393,6 +491,8 @@ struct DiscourseNestedTopicResponse: Decodable {
             topic = nil
             opPost = nil
             sort = nil
+            acceptedAnswers = nil
+            hasAcceptedAnswer = nil
             flatTopic = try DiscourseTopicDetail(from: decoder)
         } else {
             throw DecodingError.dataCorruptedError(
@@ -414,6 +514,8 @@ struct DiscourseNestedTopicResponse: Decodable {
         let createdAt: String?
         let tags: [DiscourseTopicDetail.Tag]
         let archetype: String?
+        let acceptedAnswers: [DiscourseTopicDetail.AcceptedAnswer]?
+        let hasAcceptedAnswer: Bool?
 
         enum CodingKeys: String, CodingKey {
             case id, title, slug, tags, archetype
@@ -422,6 +524,8 @@ struct DiscourseNestedTopicResponse: Decodable {
             case replyCount = "reply_count"
             case categoryId = "category_id"
             case createdAt = "created_at"
+            case acceptedAnswers = "accepted_answers"
+            case hasAcceptedAnswer = "has_accepted_answer"
         }
 
         init(from decoder: Decoder) throws {
@@ -436,6 +540,9 @@ struct DiscourseNestedTopicResponse: Decodable {
             createdAt = try? container.decodeIfPresent(String.self, forKey: .createdAt)
             tags = (try? container.decodeIfPresent([DiscourseTopicDetail.Tag].self, forKey: .tags)) ?? []
             archetype = try? container.decodeIfPresent(String.self, forKey: .archetype)
+            acceptedAnswers =
+                try? container.decodeIfPresent([DiscourseTopicDetail.AcceptedAnswer].self, forKey: .acceptedAnswers)
+            hasAcceptedAnswer = try? container.decodeIfPresent(Bool.self, forKey: .hasAcceptedAnswer)
         }
     }
 }

@@ -254,8 +254,8 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
         var config: UIButton.Configuration
         if isActive {
             config = .tinted()
-            config.baseBackgroundColor = .systemBlue
-            config.baseForegroundColor = .systemBlue
+            config.baseBackgroundColor = ThemeManager.shared.accentColor
+            config.baseForegroundColor = ThemeManager.shared.accentColor
         } else {
             config = .gray()
             config.baseForegroundColor = .secondaryLabel

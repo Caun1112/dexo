@@ -62,6 +62,8 @@ enum DiscourseRouter {
     case toggleReaction(postId: Int, reactionId: String)
     case likePost
     case unlikePost(postId: Int)
+    case acceptSolution
+    case unacceptSolution
     case votePoll
     case removePollVote
     case markNotificationRead
@@ -76,7 +78,7 @@ enum DiscourseRouter {
 
     var method: HTTPMethod {
         switch self {
-        case .createTopic, .createBookmark, .createBoost, .uploadImage, .topicTimings, .messageBusPoll, .likePost, .createPrivateMessage, .flagPost, .subscribePush, .unsubscribePush:
+        case .createTopic, .createBookmark, .createBoost, .uploadImage, .topicTimings, .messageBusPoll, .likePost, .acceptSolution, .unacceptSolution, .createPrivateMessage, .flagPost, .subscribePush, .unsubscribePush:
             return .post
         case .toggleReaction, .votePoll, .markNotificationRead, .followUser:
             return .put
@@ -211,6 +213,10 @@ enum DiscourseRouter {
         case .unlikePost(let postId):
             // post_action_type_id=2 is "like"
             return "/post_actions/\(postId)?post_action_type_id=2"
+        case .acceptSolution:
+            return "/solution/accept.json"
+        case .unacceptSolution:
+            return "/solution/unaccept.json"
         case .votePoll:
             return "/polls/vote"
         case .removePollVote:

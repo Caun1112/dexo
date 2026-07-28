@@ -14,6 +14,7 @@ nonisolated enum VirtualTopicItem: Hashable, Sendable {
     case title(Int)
     case header(Int)
     case unit(RenderUnitID)
+    case acceptedAnswer(Int)
     case footer(Int)
     case boosts(Int)
     case collapsed(Int)
@@ -26,7 +27,7 @@ nonisolated enum VirtualTopicItem: Hashable, Sendable {
             return postId
         case .unit(let id):
             return id.postId
-        case .title, .loadMoreChildren, .paginationStatus:
+        case .title, .acceptedAnswer, .loadMoreChildren, .paginationStatus:
             return nil
         }
     }
@@ -64,6 +65,9 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
     private var heightPolicyCache: [RenderUnitHeightCacheKey: RenderUnitHeightPolicy] = [:]
     private var resolvedHeights: [RenderUnitID: CGFloat] = [:]
     private var resolvedBoostHeights: [Int: CGFloat] = [:]
+    private var solutionSummaryDocuments: [Int: PostRenderDocument] = [:]
+    private var solutionSummaryBodyHeights: [Int: CGFloat] = [:]
+    private var expandedSolutionPostNumbers: Set<Int> = []
     private var pendingDynamicHeights = DynamicHeightUpdateBuffer()
     private var dynamicStateRevisions: [RenderUnitID: Int] = [:]
     private var expandedDetailsUnitIds: Set<RenderUnitID> = []
@@ -115,6 +119,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         view.register(VirtualTopicTitleCell.self, forCellWithReuseIdentifier: VirtualTopicTitleCell.reuseIdentifier)
         view.register(VirtualPostHeaderCell.self, forCellWithReuseIdentifier: VirtualPostHeaderCell.reuseIdentifier)
         view.register(VirtualPostBlockCell.self, forCellWithReuseIdentifier: VirtualPostBlockCell.reuseIdentifier)
+        view.register(VirtualAcceptedAnswersCell.self, forCellWithReuseIdentifier: VirtualAcceptedAnswersCell.reuseIdentifier)
         view.register(VirtualPostFooterCell.self, forCellWithReuseIdentifier: VirtualPostFooterCell.reuseIdentifier)
         view.register(VirtualTopicMessageCell.self, forCellWithReuseIdentifier: VirtualTopicMessageCell.reuseIdentifier)
         view.register(VirtualPostCollapsedCell.self, forCellWithReuseIdentifier: VirtualPostCollapsedCell.reuseIdentifier)
@@ -234,10 +239,55 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
             cell.onCollapse = { [weak self] in
                 self?.postCell(didToggleCollapseForPostId: postId)
             }
+            cell.onSolutionToggle = { [weak self] accepting in
+                self?.toggleSolution(for: post, accepting: accepting)
+            }
             if self.pendingReactionConfirmationPostIds.remove(postId) != nil {
                 DispatchQueue.main.async { [weak cell] in
                     cell?.playReactionDestinationFeedback()
                 }
+            }
+            return cell
+
+        case .acceptedAnswer(let postNumber):
+            let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: VirtualAcceptedAnswersCell.reuseIdentifier,
+                for: indexPath
+            ) as! VirtualAcceptedAnswersCell
+            guard let answer = self.solutionAnswer(postNumber: postNumber),
+                  let document = self.solutionDocument(for: answer)
+            else { return cell }
+            let contentWidth = max(
+                1,
+                collectionView.bounds.width
+                    - VirtualAcceptedAnswersCell.cardContentHorizontalInsets
+            )
+            let config = NativeRenderConfig.default(
+                contentWidth: contentWidth,
+                baseURL: self.baseURL
+            )
+            cell.configure(
+                answer: answer,
+                document: document,
+                config: config,
+                naturalBodyHeight: self.solutionSummaryBodyHeights[postNumber] ?? 1,
+                expanded: self.expandedSolutionPostNumbers.contains(postNumber),
+                displayFloor: self.solutionDisplayFloor(for: answer),
+                baseURL: self.baseURL,
+                delegate: self
+            )
+            cell.onSelect = { [weak self] postNumber in
+                self?.performJump(to: postNumber)
+            }
+            cell.onExpansionChange = { [weak self] expanded in
+                guard let self else { return }
+                let anchor = self.captureAnchor()
+                if expanded {
+                    self.expandedSolutionPostNumbers.insert(postNumber)
+                } else {
+                    self.expandedSolutionPostNumbers.remove(postNumber)
+                }
+                self.applySnapshot(reloadVisible: true, preserving: anchor)
             }
             return cell
 
@@ -647,9 +697,11 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
             themeRevision: ThemeManager.shared.revision
         )
 
-        let result = TopicRenderMetrics.measure("PrepareTopicHeights") { () -> ([RenderUnitID: RenderUnitHeightPolicy], [Int: CGFloat]) in
+        let result = TopicRenderMetrics.measure("PrepareTopicHeights") {
+            () -> ([RenderUnitID: RenderUnitHeightPolicy], [Int: CGFloat], [Int: CGFloat]) in
             var policies: [RenderUnitID: RenderUnitHeightPolicy] = [:]
             var boostHeights: [Int: CGFloat] = [:]
+            var solutionHeights: [Int: CGFloat] = [:]
 
             for post in viewModel.visiblePosts {
                 guard let document = viewModel.renderDocuments[post.id] else { continue }
@@ -690,15 +742,93 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
                     )
                 }
             }
-            return (policies, boostHeights)
+
+            let solutionContentWidth = max(
+                1,
+                width - VirtualAcceptedAnswersCell.cardContentHorizontalInsets
+            )
+            let solutionConfig = NativeRenderConfig.default(
+                contentWidth: solutionContentWidth,
+                baseURL: baseURL
+            )
+            for answer in viewModel.topic?.acceptedAnswers ?? [] {
+                guard let document = solutionDocument(for: answer) else { continue }
+                solutionHeights[answer.postNumber] =
+                    VirtualAcceptedAnswersCell.measuredBodyHeight(
+                        document: document,
+                        config: solutionConfig
+                    )
+            }
+            return (policies, boostHeights, solutionHeights)
         }
 
         preparedLayout = PreparedTopicLayout(environment: rootEnvironment, unitPolicies: result.0)
         resolvedBoostHeights = result.1
+        solutionSummaryBodyHeights = result.2
         if heightPolicyCache.count > 4_000 {
             let active = Set(result.0.keys)
             heightPolicyCache = heightPolicyCache.filter { active.contains($0.key.unitId) }
         }
+    }
+
+    private func solutionAnswer(
+        postNumber: Int
+    ) -> DiscourseTopicDetail.AcceptedAnswer? {
+        viewModel.topic?.acceptedAnswers.first { $0.postNumber == postNumber }
+    }
+
+    private func solutionDisplayFloor(
+        for answer: DiscourseTopicDetail.AcceptedAnswer
+    ) -> Int {
+        let answerId =
+            answer.id
+            ?? viewModel.postsById.values.first(where: {
+                $0.postNumber == answer.postNumber
+            })?.id
+        guard let answerId,
+              let streamIndex = viewModel.allPostIds.firstIndex(of: answerId)
+        else { return answer.postNumber }
+        return streamIndex + 1
+    }
+
+    /// Prefer the already-parsed authoritative post. If that post is outside
+    /// the current virtual window, build the same native document from the
+    /// solved-plugin excerpt carried by the topic response.
+    private func solutionDocument(
+        for answer: DiscourseTopicDetail.AcceptedAnswer
+    ) -> PostRenderDocument? {
+        let matchingPost =
+            answer.id.flatMap { viewModel.postsById[$0] }
+            ?? viewModel.postsById.values.first(where: {
+                $0.postNumber == answer.postNumber
+            })
+        if let matchingPost,
+           let document = viewModel.renderDocuments[matchingPost.id]
+        {
+            return document
+        }
+
+        guard let cooked = answer.cooked, !cooked.isEmpty else { return nil }
+        let syntheticId = answer.id ?? -(max(1, answer.postNumber) + 1)
+        let input = PostRenderInput(postId: syntheticId, cookedHTML: cooked)
+        if let cached = solutionSummaryDocuments[answer.postNumber],
+           cached.contentVersion == input.contentVersion
+        {
+            return cached
+        }
+        let annotated = CookedHTMLParser.parseAnnotated(html: cooked, baseURL: baseURL)
+        let document = PostRenderDocument(
+            postId: syntheticId,
+            contentVersion: input.contentVersion,
+            annotatedBlocks: annotated,
+            units: RenderUnitBuilder.build(
+                postId: syntheticId,
+                contentVersion: input.contentVersion,
+                annotatedBlocks: annotated
+            )
+        )
+        solutionSummaryDocuments[answer.postNumber] = document
+        return document
     }
 
     private func preflightHeightPolicy(
@@ -835,6 +965,12 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
                     let item = VirtualTopicItem.unit(unit.id)
                     items.append(item)
                     postIdByItem[item] = post.id
+                }
+                if post.postNumber == 1, let topic = viewModel.topic {
+                    for answer in topic.acceptedAnswers
+                    where solutionDocument(for: answer) != nil {
+                        items.append(.acceptedAnswer(answer.postNumber))
+                    }
                 }
                 let footer = VirtualTopicItem.footer(post.id)
                 items.append(footer)
@@ -1292,6 +1428,11 @@ extension VirtualizedTopicDetailViewController: TopicTimelineLayoutDelegate {
             let title = viewModel.topic?.fancyTitle ?? viewModel.topic?.title ?? ""
             return VirtualTopicTitleCell.height(title: title, tags: viewModel.topic?.tags ?? [], width: width)
         case .header: return max(56, FontManager.shared.scaled(32) + 24)
+        case .acceptedAnswer(let postNumber):
+            return VirtualAcceptedAnswersCell.height(
+                naturalBodyHeight: solutionSummaryBodyHeights[postNumber] ?? 1,
+                expanded: expandedSolutionPostNumbers.contains(postNumber)
+            )
         case .footer: return 50
         case .collapsed: return PostCollapsedCell.cellHeight
         case .loadMoreChildren: return LoadMoreChildrenCell.cellHeight
@@ -1837,6 +1978,37 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
                 applySnapshot(reloadVisible: true)
             } catch {
                 presentChallengePromptIfNeeded(error: error, on: api)
+            }
+        }
+    }
+
+    private func toggleSolution(for post: DiscourseTopicDetail.Post, accepting: Bool) {
+        requireAuthentication { [weak self] in
+            guard let self else { return }
+            Task {
+                do {
+                    let answers: [DiscourseTopicDetail.AcceptedAnswer]?
+                    if accepting {
+                        answers = try await self.api.acceptSolution(postId: post.id)
+                    } else {
+                        answers = try await self.api.unacceptSolution(postId: post.id)
+                    }
+                    let anchor = self.captureAnchor()
+                    self.viewModel.applySolutionMutation(
+                        postId: post.id,
+                        accepting: accepting,
+                        acceptedAnswers: answers
+                    )
+                    self.applySnapshot(reloadVisible: true, preserving: anchor)
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                } catch {
+                    // Reconfigure the visible footer so its temporarily
+                    // disabled solution button becomes interactive again.
+                    self.applySnapshot(reloadVisible: true, preserving: self.captureAnchor())
+                    if !self.presentChallengePromptIfNeeded(error: error, on: self.api) {
+                        self.presentError(error)
+                    }
+                }
             }
         }
     }

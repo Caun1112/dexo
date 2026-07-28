@@ -369,11 +369,31 @@ final class VirtualPostHeaderCell: UICollectionViewCell {
         nameLabel.clipsToBounds = false
         usernameLabel.text = post.username
         usernameLabel.textColor = .secondaryLabel
-        if let title = post.userTitle, !title.isEmpty {
-            userTitleLabel.text = "· \(title)"
+        let userTitle = post.userTitle?.isEmpty == false ? post.userTitle : nil
+        if userTitle != nil || post.acceptedAnswer {
+            let metadata = NSMutableAttributedString()
+            if let userTitle {
+                metadata.append(NSAttributedString(
+                    string: "· \(userTitle)",
+                    attributes: [.foregroundColor: UIColor.secondaryLabel]
+                ))
+            }
+            if post.acceptedAnswer {
+                if userTitle != nil {
+                    metadata.append(NSAttributedString(string: "  "))
+                }
+                metadata.append(NSAttributedString(
+                    string: "✓ \(String(localized: "solution.resolved"))",
+                    attributes: [
+                        .foregroundColor: ThemeManager.shared.accentColor,
+                        .font: FontManager.shared.font(size: 12, weight: .semibold),
+                    ]
+                ))
+            }
+            userTitleLabel.attributedText = metadata
             userTitleLabel.isHidden = false
         } else {
-            userTitleLabel.text = nil
+            userTitleLabel.attributedText = nil
             userTitleLabel.isHidden = true
         }
         if let replyUser = post.replyToUser, treeState == nil {
@@ -940,8 +960,419 @@ private final class VirtualReactionPickerViewController: UIViewController {
     }
 }
 
+/// Native solved-answer preview rendered below the OP. Long content is clipped
+/// behind a fade until the user explicitly expands it.
+final class VirtualAcceptedAnswersCell: UICollectionViewCell, UITextViewDelegate {
+    static let reuseIdentifier = "VirtualAcceptedAnswersCell"
+
+    static let collapsedBodyHeight: CGFloat = 176
+    private static let outerInset: CGFloat = 8
+    private static let cardHorizontalInset: CGFloat = 16
+    private static let bodyHorizontalInset: CGFloat = 12
+    private static let headerHeight: CGFloat = 40
+    private static let authorHeight: CGFloat = 48
+    private static let bodyTopInset: CGFloat = 12
+    private static let bodyBottomInset: CGFloat = 12
+    private static let toggleHeight: CGFloat = 38
+    static var cardContentHorizontalInsets: CGFloat {
+        (cardHorizontalInset + bodyHorizontalInset) * 2
+    }
+
+    private let card = UIView()
+    private let header = UIView()
+    private let headerIcon = UIImageView(image: UIImage(systemName: "checkmark.square"))
+    private let headerLabel = UILabel()
+    private let authorRow = UIView()
+    private let avatar = UIImageView()
+    private let authorLabel = UILabel()
+    private let timeLabel = UILabel()
+    private let chevron = UIImageView(image: UIImage(systemName: "chevron.up"))
+    private let authorButton = UIButton(type: .system)
+    private let bodyClipView = UIView()
+    private let bodyStack = UIStackView()
+    private let fadeView = UIView()
+    private let fadeLayer = CAGradientLayer()
+    private let toggleButton = UIButton(type: .system)
+    private var bodyHeightConstraint: NSLayoutConstraint!
+    private var toggleHeightConstraint: NSLayoutConstraint!
+    private weak var postDelegate: PostCellDelegate?
+    private var inlineImageOperations: [SDWebImageOperation] = []
+    private var answerPostNumber = 0
+    private var isExpanded = false
+
+    var onSelect: ((Int) -> Void)?
+    var onExpansionChange: ((Bool) -> Void)?
+
+    static func height(naturalBodyHeight: CGFloat, expanded: Bool) -> CGFloat {
+        let bodyHeight = expanded
+            ? naturalBodyHeight
+            : min(naturalBodyHeight, collapsedBodyHeight)
+        let hasOverflow = naturalBodyHeight > collapsedBodyHeight + 1
+        return outerInset * 2
+            + headerHeight
+            + authorHeight
+            + bodyTopInset
+            + ceil(bodyHeight)
+            + (hasOverflow ? toggleHeight : bodyBottomInset)
+    }
+
+    static func measuredBodyHeight(
+        document: PostRenderDocument,
+        config: NativeRenderConfig
+    ) -> CGFloat {
+        let heights = BlockHeightCalculator.perBlockHeights(
+            annotatedBlocks: document.annotatedBlocks,
+            config: config
+        )
+        let resolved = heights.compactMap { $0 }
+        if resolved.count == heights.count {
+            let spacing = CGFloat(max(0, resolved.count - 1))
+                * NativeContentRenderer.contentStackSpacing
+            return max(1, resolved.reduce(0, +) + spacing)
+        }
+
+        let views = NativeContentRenderer.renderBlocks(
+            document.annotatedBlocks,
+            config: config,
+            delegate: nil,
+            precomputedBlockHeights: heights
+        )
+        let stack = UIStackView(arrangedSubviews: views)
+        stack.axis = .vertical
+        stack.spacing = NativeContentRenderer.contentStackSpacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let host = UIView()
+        host.addSubview(stack)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: config.contentWidth),
+            stack.topAnchor.constraint(equalTo: host.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+        return max(1, ceil(host.systemLayoutSizeFitting(
+            CGSize(width: config.contentWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height))
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.layer.cornerRadius = 12
+        card.layer.borderWidth = 1.0 / UIScreen.main.scale
+        card.clipsToBounds = true
+        contentView.addSubview(card)
+
+        header.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(header)
+        headerIcon.translatesAutoresizingMaskIntoConstraints = false
+        headerIcon.contentMode = .scaleAspectFit
+        header.addSubview(headerIcon)
+        headerLabel.translatesAutoresizingMaskIntoConstraints = false
+        headerLabel.font = FontManager.shared.font(size: 14, weight: .bold)
+        header.addSubview(headerLabel)
+
+        authorRow.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(authorRow)
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatar.contentMode = .scaleAspectFill
+        avatar.clipsToBounds = true
+        authorRow.addSubview(avatar)
+        authorLabel.translatesAutoresizingMaskIntoConstraints = false
+        authorLabel.font = FontManager.shared.font(size: 14, weight: .semibold)
+        authorRow.addSubview(authorLabel)
+        timeLabel.translatesAutoresizingMaskIntoConstraints = false
+        timeLabel.font = FontManager.shared.font(size: 13)
+        authorRow.addSubview(timeLabel)
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        chevron.contentMode = .scaleAspectFit
+        authorRow.addSubview(chevron)
+        authorButton.translatesAutoresizingMaskIntoConstraints = false
+        authorButton.addTarget(self, action: #selector(authorTapped), for: .touchUpInside)
+        authorRow.addSubview(authorButton)
+
+        bodyClipView.translatesAutoresizingMaskIntoConstraints = false
+        bodyClipView.clipsToBounds = true
+        card.addSubview(bodyClipView)
+        bodyStack.translatesAutoresizingMaskIntoConstraints = false
+        bodyStack.axis = .vertical
+        bodyStack.spacing = NativeContentRenderer.contentStackSpacing
+        bodyClipView.addSubview(bodyStack)
+        fadeView.translatesAutoresizingMaskIntoConstraints = false
+        fadeView.isUserInteractionEnabled = false
+        fadeView.layer.addSublayer(fadeLayer)
+        bodyClipView.addSubview(fadeView)
+
+        toggleButton.translatesAutoresizingMaskIntoConstraints = false
+        toggleButton.contentHorizontalAlignment = .leading
+        toggleButton.titleLabel?.font = FontManager.shared.font(size: 14, weight: .medium)
+        toggleButton.addTarget(self, action: #selector(toggleTapped), for: .touchUpInside)
+        card.addSubview(toggleButton)
+
+        bodyHeightConstraint = bodyClipView.heightAnchor.constraint(equalToConstant: 1)
+        toggleHeightConstraint = toggleButton.heightAnchor.constraint(equalToConstant: Self.bodyBottomInset)
+
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.outerInset),
+            card.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.cardHorizontalInset),
+            card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Self.cardHorizontalInset),
+            card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Self.outerInset),
+
+            header.topAnchor.constraint(equalTo: card.topAnchor),
+            header.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            header.heightAnchor.constraint(equalToConstant: Self.headerHeight),
+            headerIcon.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12),
+            headerIcon.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            headerIcon.widthAnchor.constraint(equalToConstant: 18),
+            headerIcon.heightAnchor.constraint(equalToConstant: 18),
+            headerLabel.leadingAnchor.constraint(equalTo: headerIcon.trailingAnchor, constant: 8),
+            headerLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -12),
+
+            authorRow.topAnchor.constraint(equalTo: header.bottomAnchor),
+            authorRow.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            authorRow.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            authorRow.heightAnchor.constraint(equalToConstant: Self.authorHeight),
+            avatar.leadingAnchor.constraint(equalTo: authorRow.leadingAnchor, constant: 12),
+            avatar.centerYAnchor.constraint(equalTo: authorRow.centerYAnchor),
+            avatar.widthAnchor.constraint(equalToConstant: 28),
+            avatar.heightAnchor.constraint(equalToConstant: 28),
+            authorLabel.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: 8),
+            authorLabel.centerYAnchor.constraint(equalTo: authorRow.centerYAnchor),
+            timeLabel.leadingAnchor.constraint(equalTo: authorLabel.trailingAnchor, constant: 6),
+            timeLabel.centerYAnchor.constraint(equalTo: authorRow.centerYAnchor),
+            timeLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -8),
+            chevron.trailingAnchor.constraint(equalTo: authorRow.trailingAnchor, constant: -12),
+            chevron.centerYAnchor.constraint(equalTo: authorRow.centerYAnchor),
+            chevron.widthAnchor.constraint(equalToConstant: 12),
+            chevron.heightAnchor.constraint(equalToConstant: 12),
+            authorButton.topAnchor.constraint(equalTo: authorRow.topAnchor),
+            authorButton.leadingAnchor.constraint(equalTo: authorRow.leadingAnchor),
+            authorButton.trailingAnchor.constraint(equalTo: authorRow.trailingAnchor),
+            authorButton.bottomAnchor.constraint(equalTo: authorRow.bottomAnchor),
+
+            bodyClipView.topAnchor.constraint(equalTo: authorRow.bottomAnchor, constant: Self.bodyTopInset),
+            bodyClipView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.bodyHorizontalInset),
+            bodyClipView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.bodyHorizontalInset),
+            bodyHeightConstraint,
+            bodyStack.topAnchor.constraint(equalTo: bodyClipView.topAnchor),
+            bodyStack.leadingAnchor.constraint(equalTo: bodyClipView.leadingAnchor),
+            bodyStack.trailingAnchor.constraint(equalTo: bodyClipView.trailingAnchor),
+            fadeView.leadingAnchor.constraint(equalTo: bodyClipView.leadingAnchor),
+            fadeView.trailingAnchor.constraint(equalTo: bodyClipView.trailingAnchor),
+            fadeView.bottomAnchor.constraint(equalTo: bodyClipView.bottomAnchor),
+            fadeView.heightAnchor.constraint(equalToConstant: 64),
+
+            toggleButton.topAnchor.constraint(equalTo: bodyClipView.bottomAnchor),
+            toggleButton.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.bodyHorizontalInset),
+            toggleButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.bodyHorizontalInset),
+            toggleButton.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            toggleHeightConstraint,
+        ])
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    func configure(
+        answer: DiscourseTopicDetail.AcceptedAnswer,
+        document: PostRenderDocument,
+        config: NativeRenderConfig,
+        naturalBodyHeight: CGFloat,
+        expanded: Bool,
+        displayFloor: Int,
+        baseURL: String,
+        delegate: PostCellDelegate?
+    ) {
+        backgroundColor = ThemeManager.shared.cardBackgroundColor
+        contentView.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        card.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        card.layer.borderColor = UIColor.separator.resolvedColor(with: traitCollection).cgColor
+        header.backgroundColor = ThemeManager.shared.codeBackgroundColor
+        headerIcon.tintColor = ThemeManager.shared.accentColor
+        headerLabel.textColor = ThemeManager.shared.accentColor
+        headerLabel.text = String(localized: "solution.resolved")
+        authorLabel.textColor = .label
+        timeLabel.textColor = .secondaryLabel
+        chevron.tintColor = .tertiaryLabel
+        toggleButton.setTitleColor(ThemeManager.shared.accentColor, for: .normal)
+        self.postDelegate = delegate
+        answerPostNumber = answer.postNumber
+
+        let displayName =
+            answer.name.flatMap { $0.isEmpty ? nil : $0 }
+            ?? (answer.username.isEmpty ? String(localized: "solution.unknown_author") : answer.username)
+        authorLabel.text = displayName
+        if let createdAt = answer.createdAt,
+           let displayDate = Self.displayDate(createdAt)
+        {
+            timeLabel.text = "· \(displayDate)"
+        } else {
+            timeLabel.text = nil
+        }
+        let destinationFormat = String(localized: "solution.answer.row %@ %lld")
+        authorButton.accessibilityLabel = String.localizedStringWithFormat(
+            destinationFormat,
+            displayName,
+            displayFloor
+        )
+        authorButton.accessibilityHint = String(localized: "solution.answer.jump_hint")
+
+        avatar.layer.cornerRadius = 14
+        avatar.backgroundColor = ThemeManager.shared.codeBackgroundColor
+        avatar.sd_cancelCurrentImageLoad()
+        avatar.image = nil
+        if let template = answer.avatarTemplate {
+            let sized = template.replacingOccurrences(of: "{size}", with: "96")
+            avatar.sd_setImage(
+                with: URL(string: sized.hasPrefix("http") ? sized : baseURL + sized),
+                context: ImageCacheManager.shared.avatarContext
+            )
+        }
+
+        clearBody()
+        let heights = BlockHeightCalculator.perBlockHeights(
+            annotatedBlocks: document.annotatedBlocks,
+            config: config
+        )
+        let views = NativeContentRenderer.renderBlocks(
+            document.annotatedBlocks,
+            config: config,
+            delegate: delegate,
+            precomputedBlockHeights: heights
+        )
+        for view in views {
+            bodyStack.addArrangedSubview(view)
+            configureTextViews(in: view)
+        }
+
+        let hasOverflow = naturalBodyHeight > Self.collapsedBodyHeight + 1
+        isExpanded = expanded
+        bodyHeightConstraint.constant = expanded
+            ? naturalBodyHeight
+            : min(naturalBodyHeight, Self.collapsedBodyHeight)
+        fadeView.isHidden = expanded || !hasOverflow
+        toggleButton.isHidden = !hasOverflow
+        toggleButton.isUserInteractionEnabled = hasOverflow
+        toggleHeightConstraint.constant = hasOverflow ? Self.toggleHeight : Self.bodyBottomInset
+        toggleButton.setTitle(
+            expanded
+                ? String(localized: "solution.collapse")
+                : String(localized: "solution.read_more"),
+            for: .normal
+        )
+
+        let resolvedBackground = ThemeManager.shared.cardBackgroundColor.resolvedColor(with: traitCollection)
+        fadeLayer.colors = [
+            resolvedBackground.withAlphaComponent(0).cgColor,
+            resolvedBackground.cgColor,
+        ]
+        fadeLayer.locations = [0, 0.78]
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onSelect = nil
+        onExpansionChange = nil
+        postDelegate = nil
+        answerPostNumber = 0
+        isExpanded = false
+        avatar.sd_cancelCurrentImageLoad()
+        clearBody()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        fadeLayer.frame = fadeView.bounds
+    }
+
+    private func clearBody() {
+        for operation in inlineImageOperations {
+            operation.cancel()
+        }
+        inlineImageOperations.removeAll(keepingCapacity: true)
+        for view in bodyStack.arrangedSubviews {
+            bodyStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+    }
+
+    private func configureTextViews(in view: UIView) {
+        if let textView = view as? UITextView {
+            textView.delegate = self
+            (textView as? LinkTextView)?.configureSpoilerIfNeeded()
+            loadInlineImages(in: textView)
+        }
+        for subview in view.subviews {
+            configureTextViews(in: subview)
+        }
+    }
+
+    private func loadInlineImages(in textView: UITextView) {
+        guard let text = textView.attributedText, text.length > 0 else { return }
+        let fullRange = NSRange(location: 0, length: text.length)
+        text.enumerateAttribute(.cookedHTMLImageURL, in: fullRange) { value, range, _ in
+            guard let raw = value as? String, let url = URL(string: raw) else { return }
+            let operation = SDWebImageManager.shared.loadImage(
+                with: url,
+                context: ImageCacheManager.shared.emojiContext,
+                progress: nil
+            ) { [weak textView] image, _, _, _, _, _ in
+                guard let image, let textView else { return }
+                for location in range.location..<(range.location + range.length) {
+                    guard let attachment = text.attribute(
+                        .attachment,
+                        at: location,
+                        effectiveRange: nil
+                    ) as? NSTextAttachment else { continue }
+                    attachment.image = image
+                    textView.textStorage.edited(
+                        .editedAttributes,
+                        range: NSRange(location: location, length: 1),
+                        changeInLength: 0
+                    )
+                }
+            }
+            if let operation {
+                inlineImageOperations.append(operation)
+            }
+        }
+    }
+
+    func textView(
+        _ textView: UITextView,
+        shouldInteractWith url: URL,
+        in characterRange: NSRange,
+        interaction: UITextItemInteraction
+    ) -> Bool {
+        postDelegate?.postCell(didTapLinkURL: url)
+        return false
+    }
+
+    @objc private func authorTapped() {
+        onSelect?(answerPostNumber)
+    }
+
+    @objc private func toggleTapped() {
+        onExpansionChange?(!isExpanded)
+    }
+
+    private static func displayDate(_ value: String) -> String? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: value) else { return nil }
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .abbreviated
+        return relative.localizedString(for: date, relativeTo: Date())
+    }
+}
+
 final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationControllerDelegate {
     static let reuseIdentifier = "VirtualPostFooterCell"
+    private let solution = UIButton(type: .system)
     private let reply = UIButton(type: .system)
     private let like = UIButton(type: .system)
     private let boost = UIButton(type: .system)
@@ -964,6 +1395,7 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
     var onCreateBoost: (() -> Void)?
     var onShowReplies: (() -> Void)?
     var onCollapse: (() -> Void)?
+    var onSolutionToggle: ((Bool) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -972,21 +1404,24 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
         separatorLine.translatesAutoresizingMaskIntoConstraints = false
         separatorLine.backgroundColor = .separator
         contentView.addSubview(separatorLine)
+        solution.setImage(UIImage(systemName: "checkmark.square"), for: .normal)
         reply.setImage(UIImage(systemName: "arrowshape.turn.up.left"), for: .normal)
         like.setImage(UIImage(systemName: "heart"), for: .normal)
         boost.setImage(UIImage(named: "roket.symbols"), for: .normal)
         more.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        solution.accessibilityLabel = String(localized: "solution.accept")
         reply.accessibilityLabel = String(localized: "reply.title")
         like.accessibilityLabel = String(localized: "post.a11y.like")
         boost.accessibilityLabel = String(localized: "post.a11y.boost")
         more.accessibilityLabel = String(localized: "action.more")
+        solution.addTarget(self, action: #selector(solutionTapped), for: .touchUpInside)
         reply.addTarget(self, action: #selector(replyTapped), for: .touchUpInside)
         like.addTarget(self, action: #selector(likeTapped), for: .touchUpInside)
         boost.addTarget(self, action: #selector(boostTapped), for: .touchUpInside)
         like.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(likeLongPressed(_:))))
         boost.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(boostLongPressed(_:))))
         more.showsMenuAsPrimaryAction = true
-        let stack = UIStackView(arrangedSubviews: [boost, like, reply, more])
+        let stack = UIStackView(arrangedSubviews: [solution, boost, like, reply, more])
         stack.axis = .horizontal
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -1055,6 +1490,27 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
         reactionSummaryView.configure(reactions: post.reactions, count: post.reactionUsersCount)
         reply.isHidden = false
         more.isHidden = false
+        let canUnacceptSolution =
+            post.acceptedAnswer && (post.canUnacceptAnswer || post.canAcceptAnswer)
+        let canAcceptSolution =
+            !post.acceptedAnswer && post.canAcceptAnswer && !post.topicAcceptedAnswer
+        solution.isHidden = !(post.acceptedAnswer || canAcceptSolution)
+        solution.isEnabled = true
+        solution.isUserInteractionEnabled = canAcceptSolution || canUnacceptSolution
+        solution.setImage(
+            UIImage(systemName: post.acceptedAnswer ? "checkmark.square.fill" : "checkmark.square"),
+            for: .normal
+        )
+        solution.tintColor = post.acceptedAnswer
+            ? ThemeManager.shared.accentColor
+            : .secondaryLabel
+        solution.accessibilityLabel = String(
+            localized: canUnacceptSolution ? "solution.unaccept" : (
+                post.acceptedAnswer ? "solution.accepted" : "solution.accept"
+            )
+        )
+        solution.accessibilityTraits =
+            (canAcceptSolution || canUnacceptSolution) ? .button : .staticText
         let liked = post.likeAction?.acted == true
         let reactionsPluginActive = !validReactions.isEmpty
         let canAct = post.likeAction?.canAct == true
@@ -1086,7 +1542,7 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
         ) ?? 0
         separatorLine.isHidden = !showsSeparator
         if post.deletedPostPlaceholder {
-            for button in [reply, like, boost, more, showReplies] { button.isHidden = true }
+            for button in [solution, reply, like, boost, more, showReplies] { button.isHidden = true }
             reactionSummaryView.reset()
         }
     }
@@ -1118,6 +1574,7 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
         onCreateBoost = nil
         onShowReplies = nil
         onCollapse = nil
+        onSolutionToggle = nil
         more.menu = nil
         reactionSummaryView.reset()
         currentReactionImageView.sd_cancelCurrentImageLoad()
@@ -1130,6 +1587,13 @@ final class VirtualPostFooterCell: UICollectionViewCell, UIPopoverPresentationCo
     }
 
     @objc private func replyTapped() { onReply?() }
+
+    @objc private func solutionTapped() {
+        guard let post = currentPost else { return }
+        let accepting = !post.acceptedAnswer
+        solution.isEnabled = false
+        onSolutionToggle?(accepting)
+    }
 
     func playReactionSuccessFeedback(animated: Bool) {
         guard animated else {
