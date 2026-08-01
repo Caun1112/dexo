@@ -356,7 +356,7 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
 
     func performLogout() {
         let coordinator = PushSubscriptionCoordinator(api: api)
-        if let username = authManager.username(for: forum.baseURL) {
+        if let username = authManager.username(for: forum.baseURL) ?? forum.username {
             if coordinator.hasSubscription(username: username) {
                 Task {
                     await coordinator.disableForLogout(username: username)
@@ -365,7 +365,7 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
                 return
             }
         }
-        coordinator.discardLocalSubscriptions()
+        coordinator.retireLocalSubscriptions()
         finishLogout()
     }
 

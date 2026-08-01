@@ -4,6 +4,7 @@ import ImageIO
 import Intents
 import OSLog
 import PushCrypto
+import Security
 import UniformTypeIdentifiers
 import UserNotifications
 
@@ -16,6 +17,7 @@ final class NotificationService: UNNotificationServiceExtension {
 
     private var contentHandler: ((UNNotificationContent) -> Void)?
     private var bestAttemptContent: UNMutableNotificationContent?
+    private var revocationTask: URLSessionDataTask?
 
     override func didReceive(
         _ request: UNNotificationRequest,
@@ -28,17 +30,55 @@ final class NotificationService: UNNotificationServiceExtension {
         }
         bestAttemptContent = content
 
-        guard let envelope = EncryptedEnvelope(userInfo: content.userInfo),
-              let accessGroup = Bundle.main.object(
+        guard let envelope = EncryptedEnvelope(userInfo: content.userInfo) else {
+            finish(with: content)
+            return
+        }
+
+        guard let accessGroup = Bundle.main.object(
                 forInfoDictionaryKey: "DexoPushKeychainAccessGroup"
               ) as? String,
-              let keychain = try? PushKeychainStore(accessGroup: accessGroup),
-              let subscription = try? keychain.load(subscriptionID: envelope.subscriptionID),
-              let decrypted = try? WebPushDecryptor.decrypt(
+              let keychain = try? PushKeychainStore(accessGroup: accessGroup) else {
+            finish(with: content)
+            return
+        }
+
+        let subscription: StoredWebPushSubscription
+        do {
+            subscription = try keychain.load(subscriptionID: envelope.subscriptionID)
+        } catch PushKeychainError.unexpectedStatus(errSecItemNotFound) {
+            reportRevocationThenFinish(envelope, content: content)
+            return
+        } catch PushKeychainError.malformedRecord {
+            reportRevocationThenFinish(envelope, content: content)
+            return
+        } catch {
+            // A temporarily locked or unavailable Keychain is not proof that
+            // the subscription is permanently unusable.
+            finish(with: content)
+            return
+        }
+
+        guard subscription.deliveryEnabled else {
+            // Logout/auth-expiry paths mute the Keychain record before any
+            // network call. If that call was offline, the next push carries
+            // the relay-signed receipt needed to finish revocation.
+            reportRevocationThenFinish(envelope, content: content)
+            return
+        }
+
+        let decrypted: Data
+        do {
+            decrypted = try WebPushDecryptor.decrypt(
                 body: envelope.webPushBody,
                 keyMaterial: subscription.keyMaterial
-              ),
-              let payload = try? JSONDecoder().decode(DiscoursePayload.self, from: decrypted),
+            )
+        } catch {
+            reportRevocationThenFinish(envelope, content: content)
+            return
+        }
+
+        guard let payload = try? JSONDecoder().decode(DiscoursePayload.self, from: decrypted),
               payload.isValid(for: subscription.forumBaseURL) else {
             finish(with: content)
             return
@@ -61,6 +101,7 @@ final class NotificationService: UNNotificationServiceExtension {
         }
         userInfo.removeValue(forKey: "dexo")
         content.userInfo = userInfo
+        bestAttemptContent = content
 
         guard let forumContext else {
             finish(with: content)
@@ -102,10 +143,71 @@ final class NotificationService: UNNotificationServiceExtension {
     }
 
     private func finish(with content: UNNotificationContent) {
+        revocationTask?.cancel()
+        revocationTask = nil
         let handler = contentHandler
         contentHandler = nil
         bestAttemptContent = nil
         handler?(content)
+    }
+
+    private func reportRevocationThenFinish(
+        _ envelope: EncryptedEnvelope,
+        content: UNNotificationContent
+    ) {
+        guard let receipt = envelope.revocationReceipt,
+              let host = Bundle.main.object(
+                forInfoDictionaryKey: "DexoPushRelayHost"
+              ) as? String,
+              !host.isEmpty,
+              !host.contains("://"),
+              !host.contains("/"),
+              !host.contains("?"),
+              !host.contains("#"),
+              let baseURL = URL(string: "https://\(host)"),
+              baseURL.host == host else {
+            finish(with: content)
+            return
+        }
+
+        let report = RevocationReport(
+            subscriptionID: envelope.subscriptionID,
+            expiresAt: receipt.expiresAt,
+            proof: receipt.proof
+        )
+        guard let body = try? JSONEncoder().encode(report) else {
+            finish(with: content)
+            return
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/revocations"))
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.timeoutInterval = 2
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 2
+        configuration.timeoutIntervalForResource = 2
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        let session = URLSession(configuration: configuration)
+        revocationTask = session.dataTask(with: request) { [weak self] _, response, error in
+            guard let self else { return }
+            if let response = response as? HTTPURLResponse,
+               response.statusCode == 204 {
+                Self.logger.info("Unusable push subscription reported to relay")
+            } else if error != nil {
+                Self.logger.debug("Push revocation report did not complete")
+            } else {
+                Self.logger.debug("Push revocation report was rejected")
+            }
+            self.revocationTask = nil
+            self.finish(with: content)
+            session.finishTasksAndInvalidate()
+        }
+        revocationTask?.resume()
     }
 
     private func applyForumIdentity(
@@ -365,6 +467,7 @@ private struct DownloadedForumIdentity {
 private struct EncryptedEnvelope {
     let subscriptionID: String
     let webPushBody: Data
+    let revocationReceipt: RevocationReceipt?
 
     init?(userInfo: [AnyHashable: Any]) {
         guard let value = userInfo["dexo"] as? [String: Any],
@@ -379,6 +482,34 @@ private struct EncryptedEnvelope {
         }
         self.subscriptionID = subscriptionID
         self.webPushBody = webPushBody
+        if let expiresAt = value["re"] as? Int,
+           let proof = value["rp"] as? String,
+           expiresAt > Int(Date().timeIntervalSince1970),
+           let decodedProof = try? Base64URL.decode(proof),
+           decodedProof.count == 32 {
+            revocationReceipt = RevocationReceipt(expiresAt: expiresAt, proof: proof)
+        } else {
+            revocationReceipt = nil
+        }
+    }
+}
+
+private struct RevocationReceipt {
+    let expiresAt: Int
+    let proof: String
+}
+
+private struct RevocationReport: Encodable {
+    let version = 1
+    let subscriptionID: String
+    let expiresAt: Int
+    let proof: String
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case subscriptionID = "subscription_id"
+        case expiresAt = "expires_at"
+        case proof
     }
 }
 

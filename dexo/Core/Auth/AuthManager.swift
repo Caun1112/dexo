@@ -18,7 +18,8 @@ final class AuthManager: @unchecked Sendable {
     }
 
     func username(for baseURL: String) -> String? {
-        usernameCache[baseURL]
+        let normalized = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return usernameCache[normalized]
     }
 
     /// Backfill the username cache for a baseURL when a call site discovered
@@ -167,6 +168,9 @@ final class AuthManager: @unchecked Sendable {
             KeychainHelper.deleteRSAKeyPair(for: baseURL)
             throw error
         }
+        // The new credential may belong to another account. Do not let an
+        // identity fetch failure fall back to the previous account name.
+        usernameCache.removeValue(forKey: baseURL)
 
         if let previousCredential {
             if previousCredential == AuthManager.webAuthSentinel {
@@ -183,7 +187,10 @@ final class AuthManager: @unchecked Sendable {
         KeychainHelper.deleteRSAKeyPair(for: baseURL)
 
         // 9. Fetch current user to get username
-        await fetchAndCacheUsername(baseURL: baseURL, forum: forum)
+        if let username = await fetchAndCacheUsername(baseURL: baseURL, forum: forum) {
+            await PushSubscriptionCoordinator(api: DiscourseAPI(forum: forum))
+                .rotateSubscriptionsAfterLogin(username: username)
+        }
         postAuthChange(for: baseURL)
     }
 
@@ -212,6 +219,7 @@ final class AuthManager: @unchecked Sendable {
         // Persist the new auth marker before touching either the previous API
         // key or the previous web session.
         try KeychainHelper.saveUserApiKey(AuthManager.webAuthSentinel, for: baseURL)
+        usernameCache.removeValue(forKey: baseURL)
 
         if let previousCredential, previousCredential != AuthManager.webAuthSentinel {
             revokeApiKey(previousCredential, baseURL: baseURL)
@@ -226,7 +234,10 @@ final class AuthManager: @unchecked Sendable {
         WebCookieStore.shared.userAgent = userAgent ?? previousWebSession?.userAgent
         KeychainHelper.deleteRSAKeyPair(for: baseURL)
 
-        await fetchAndCacheUsername(baseURL: baseURL, forum: forum)
+        if let username = await fetchAndCacheUsername(baseURL: baseURL, forum: forum) {
+            await PushSubscriptionCoordinator(api: DiscourseAPI(forum: forum))
+                .rotateSubscriptionsAfterLogin(username: username)
+        }
         postAuthChange(for: baseURL)
     }
 
@@ -234,7 +245,7 @@ final class AuthManager: @unchecked Sendable {
 
     /// Fetches the current user's username via `/session/current.json`, falling back to `/notifications.json`.
     /// For linux.do, skip `/session/current.json` and go straight to `/notifications.json`.
-    private func fetchAndCacheUsername(baseURL: String, forum: ForumInstance) async {
+    private func fetchAndCacheUsername(baseURL: String, forum: ForumInstance) async -> String? {
         let api = DiscourseAPI(baseURL: baseURL)
         var username: String?
 
@@ -250,11 +261,12 @@ final class AuthManager: @unchecked Sendable {
             username = notifList.username
         }
 
-        guard let username else { return }
+        guard let username else { return nil }
         usernameCache[baseURL] = username
         var forumToUpdate = forum
         forumToUpdate.username = username
         _ = try? DatabaseManager.shared.saveForum(&forumToUpdate)
+        return username
     }
 
     // MARK: - Auth Isolation Helpers

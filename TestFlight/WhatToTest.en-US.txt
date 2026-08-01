@@ -1,6 +1,6 @@
 What to Test
 
-- React to a post and confirm the feedback feels quick and clear. Tap again to remove the reaction and confirm it stays quiet.
-- Open an image in a post, then pull down to close it and confirm the gesture feels natural.
-- Tap an in-forum topic link to a specific post from within a post, and confirm the topic opens directly at that post.
-- Check solution preview expansion and acceptance in a Q&A topic, then switch themes and confirm the solution card and active search filters follow the accent color.
+- Test with the updated push relay deployed. Upgrade from an earlier build with push enabled, trigger a reply or mention, and confirm valid notifications still decrypt and open the correct forum and post.
+- With push enabled, go offline and sign out, then restore the network and trigger notifications for the old account. A generic encrypted fallback may appear once; confirm later pushes from that obsolete subscription stop after the relay retires it.
+- Sign in to a different account on the same forum. Confirm the previous account's subscription is retired without using the new account's authorization, and enabling push creates a fresh subscription for the current account.
+- Revoke the forum session or User API Key, then trigger a protected request and a push. Confirm the app signs out, the unusable subscription is reported to the relay, and subsequent pushes for it stop.

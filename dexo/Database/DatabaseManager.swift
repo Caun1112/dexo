@@ -121,6 +121,15 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        migrator.registerMigration("v5_push_stale_endpoints") { db in
+            try db.alter(table: "pushSubscription") { t in
+                t.add(
+                    column: "staleEndpointsJSON",
+                    .text
+                ).notNull().defaults(to: "[]")
+            }
+        }
+
         return migrator
     }
 
@@ -270,6 +279,16 @@ final class DatabaseManager: Sendable {
     func savePushSubscription(_ subscription: PushSubscriptionRecord) throws {
         try dbPool.write { db in
             try subscription.save(db)
+        }
+    }
+
+    func replacePushSubscription(
+        subscriptionID: String,
+        with replacement: PushSubscriptionRecord
+    ) throws {
+        try dbPool.write { db in
+            _ = try PushSubscriptionRecord.deleteOne(db, key: subscriptionID)
+            try replacement.save(db)
         }
     }
 

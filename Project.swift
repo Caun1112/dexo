@@ -111,6 +111,7 @@ let project = Project(
                 "CFBundleDisplayName": "Dexo",
                 "DexoPushAppGroup": "group.com.eilgnaw.dexo.push",
                 "DexoPushKeychainAccessGroup": "$(AppIdentifierPrefix)com.eilgnaw.dexo.pushkeys",
+                "DexoPushRelayHost": "$(DEXO_PUSH_RELAY_HOST)",
                 "NSExtension": [
                     "NSExtensionPointIdentifier": "com.apple.usernotifications.service",
                     "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).NotificationService",
@@ -127,6 +128,7 @@ let project = Project(
                     "APPLICATION_EXTENSION_API_ONLY": "YES",
                     "CODE_SIGN_STYLE": "Automatic",
                     "CURRENT_PROJECT_VERSION": "2",
+                    "DEXO_PUSH_RELAY_HOST": .string(pushRelayHost),
                     "GENERATE_INFOPLIST_FILE": "YES",
                     "MARKETING_VERSION": "1.0",
                     "PRODUCT_NAME": "DexoNotificationService",

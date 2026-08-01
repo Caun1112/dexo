@@ -29,6 +29,11 @@ struct PushRelayEndpointResponse: Decodable, Sendable {
     }
 }
 
+private struct PushRelayEndpointRevocationRequest: Encodable, Sendable {
+    let version = 1
+    let endpoint: String
+}
+
 final class PushRelayAPI: Sendable {
     private let session: URLSession
     private let baseURL: URL
@@ -80,6 +85,24 @@ final class PushRelayAPI: Sendable {
             throw PushSubscriptionError.relayRejected
         }
         return output
+    }
+
+    /// Revocation is capability-based: the relay opens its own sealed endpoint,
+    /// extracts the opaque subscription ID, and persists only an HMAC index.
+    func revokeEndpoint(_ endpoint: String) async throws {
+        let url = baseURL.appendingPathComponent("v1/revocations")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        request.httpBody = try JSONEncoder().encode(
+            PushRelayEndpointRevocationRequest(endpoint: endpoint)
+        )
+        let (_, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse,
+              (200 ..< 300).contains(response.statusCode) else {
+            throw PushSubscriptionError.relayRejected
+        }
     }
 
 #if DEBUG

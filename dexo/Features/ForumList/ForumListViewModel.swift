@@ -36,7 +36,7 @@ final class ForumListViewModel {
                     {
                         await coordinator.disableForLogout(username: username)
                     } else {
-                        coordinator.discardLocalSubscriptions()
+                        coordinator.retireLocalSubscriptions()
                     }
                     AuthManager.shared.logout(forum: forum)
                 } else {

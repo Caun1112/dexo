@@ -14,6 +14,7 @@ import UserNotifications
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
     private var shouldReconcilePushSubscriptions = false
+    private var authChangeObserver: NSObjectProtocol?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         if !EncryptedDNSManager.shared.applyCurrentSettings() {
@@ -54,7 +55,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // ImageBrowserController draws its own dot-style page indicator.
         LightboxConfig.PageIndicator.enabled = false
 
+        if let forums = try? DatabaseManager.shared.fetchAllForums() {
+            for forum in forums {
+                AuthManager.shared.restoreAuthState(for: forum)
+            }
+        }
         UNUserNotificationCenter.current().delegate = self
+        authChangeObserver = NotificationCenter.default.addObserver(
+            forName: .discourseAuthDidChange,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                await PushSubscriptionReconciler.reconcileAll()
+            }
+        }
         if (try? DatabaseManager.shared.fetchAllPushSubscriptions().isEmpty) == false {
             shouldReconcilePushSubscriptions = true
             application.registerForRemoteNotifications()
@@ -64,6 +79,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         return true
+    }
+
+    deinit {
+        if let authChangeObserver {
+            NotificationCenter.default.removeObserver(authChangeObserver)
+        }
     }
 
     // MARK: UISceneSession Lifecycle

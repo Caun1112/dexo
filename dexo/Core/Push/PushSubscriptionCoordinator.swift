@@ -88,21 +88,49 @@ final class PushSubscriptionCoordinator {
             forumId: forumID,
             accountName: username
         )
+        var replacement: PushSubscriptionRecord?
+
+        if let retiring = existing,
+           retiring.state == .retiring || retiring.state == .rotating {
+            let secret = try? loadSecret(
+                retiring.subscriptionID,
+                username: username,
+                from: keychain
+            )
+            let retirementCompleted = await finishRetirement(
+                record: retiring,
+                secret: secret?.settingDeliveryEnabled(false),
+                keychain: keychain
+            )
+            guard retirementCompleted else {
+                throw PushSubscriptionError.localRecordUnavailable
+            }
+            if retiring.state == .rotating {
+                replacement = retiring
+                existing = nil
+            } else {
+                guard try database.fetchPushSubscription(
+                    forumId: forumID,
+                    accountName: username
+                ) == nil else {
+                    throw PushSubscriptionError.localRecordUnavailable
+                }
+                existing = nil
+            }
+        }
 
         if var active = existing,
            active.state == .active,
-           let previousEndpoint = active.previousEndpoint {
+           !active.supersededEndpoints.isEmpty {
             let secret = try loadSecret(
                 active.subscriptionID,
                 username: username,
                 from: keychain
             )
-            try await api.unsubscribePush(
-                endpoint: previousEndpoint,
-                p256dh: secret.keyMaterial.p256dh,
-                auth: secret.keyMaterial.auth
+            active.supersededEndpoints = await failedUnsubscriptions(
+                active.supersededEndpoints,
+                secret: secret
             )
-            active.previousEndpoint = nil
             active.updatedAt = Date()
             try database.savePushSubscription(active)
             existing = active
@@ -113,6 +141,14 @@ final class PushSubscriptionCoordinator {
            existing.expiresAt > Date() {
             if existing.state == .active,
                existing.expiresAt > Date().addingTimeInterval(30 * 24 * 60 * 60) {
+                let secret = try loadSecret(
+                    existing.subscriptionID,
+                    username: username,
+                    from: keychain
+                )
+                if !secret.deliveryEnabled {
+                    try keychain.save(secret.settingDeliveryEnabled(true))
+                }
                 return
             }
             if existing.state == .pending {
@@ -129,19 +165,14 @@ final class PushSubscriptionCoordinator {
                 var active = existing
                 active.state = .active
                 active.updatedAt = Date()
-                if let previousEndpoint = active.previousEndpoint {
-                    do {
-                        try await api.unsubscribePush(
-                            endpoint: previousEndpoint,
-                            p256dh: secret.keyMaterial.p256dh,
-                            auth: secret.keyMaterial.auth
-                        )
-                        active.previousEndpoint = nil
-                    } catch {
-                        // Preserve it for a future cleanup attempt.
-                    }
-                }
+                active.supersededEndpoints = await failedUnsubscriptions(
+                    active.supersededEndpoints,
+                    secret: secret
+                )
                 try database.savePushSubscription(active)
+                if !secret.deliveryEnabled {
+                    try keychain.save(secret.settingDeliveryEnabled(true))
+                }
                 return
             }
         }
@@ -182,14 +213,27 @@ final class PushSubscriptionCoordinator {
                 forumId: forumID,
                 accountName: username,
                 endpoint: endpoint.endpoint,
-                previousEndpoint: existing?.endpoint,
+                previousEndpoint: nil,
                 expiresAt: endpoint.expiresAt,
                 apnsTokenFingerprint: tokenFingerprint,
                 state: .pending,
-                createdAt: existing?.createdAt ?? now,
+                createdAt: replacement?.createdAt ?? existing?.createdAt ?? now,
                 updatedAt: now
             )
-            try database.savePushSubscription(record)
+            if let existing {
+                record.supersededEndpoints = [
+                    existing.endpoint,
+                ] + existing.supersededEndpoints
+            }
+            if let replacement {
+                try database.replacePushSubscription(
+                    subscriptionID: replacement.subscriptionID,
+                    with: record
+                )
+                try? keychain.delete(subscriptionID: replacement.subscriptionID)
+            } else {
+                try database.savePushSubscription(record)
+            }
             didPersistRecord = true
             try await api.subscribePush(
                 endpoint: record.endpoint,
@@ -198,20 +242,14 @@ final class PushSubscriptionCoordinator {
             )
             record.state = .active
             record.updatedAt = Date()
-
-            if let previousEndpoint = record.previousEndpoint {
-                do {
-                    try await api.unsubscribePush(
-                        endpoint: previousEndpoint,
-                        p256dh: secret.keyMaterial.p256dh,
-                        auth: secret.keyMaterial.auth
-                    )
-                    record.previousEndpoint = nil
-                } catch {
-                    // Keep the exact old endpoint locally so a later disable can remove it.
-                }
-            }
+            record.supersededEndpoints = await failedUnsubscriptions(
+                record.supersededEndpoints,
+                secret: secret
+            )
             try database.savePushSubscription(record)
+            if !secret.deliveryEnabled {
+                try keychain.save(secret.settingDeliveryEnabled(true))
+            }
         } catch {
             if isNew, !didPersistRecord {
                 try? keychain.delete(subscriptionID: secret.subscriptionID)
@@ -226,6 +264,195 @@ final class PushSubscriptionCoordinator {
                 forumId: forumID,
                 accountName: username
               ) else { return }
+        let retirement = try markRetiring(record, username: username)
+        await finishRetirement(
+            record: retirement.record,
+            secret: retirement.secret,
+            keychain: retirement.keychain
+        )
+    }
+
+    /// Stop delivery locally before contacting the forum. If the forum is
+    /// unreachable or the credential has expired, retain the exact endpoints
+    /// and key material so a later login can finish the unsubscription.
+    func disableForLogout(username: String) async {
+        guard let forumID = api.forumID else { return }
+        guard let record = try? database.fetchPushSubscription(
+                forumId: forumID,
+                accountName: username
+              ) else {
+            retireLocalSubscriptions()
+            return
+        }
+
+        do {
+            let retirement = try markRetiring(record, username: username)
+            await finishRetirement(
+                record: retirement.record,
+                secret: retirement.secret,
+                keychain: retirement.keychain
+            )
+        } catch {
+            debugLog(
+                "[PushSubscriptionCoordinator] failed to persist logout retirement: " +
+                    error.localizedDescription
+            )
+        }
+    }
+
+    func retryRetirement(username: String) async {
+        guard let forumID = api.forumID,
+              let record = try? database.fetchPushSubscription(
+                forumId: forumID,
+                accountName: username
+              ),
+              record.state == .retiring else { return }
+        let retirement = try? markRetiring(record, username: username)
+        await finishRetirement(
+            record: retirement?.record ?? record,
+            secret: retirement?.secret,
+            keychain: retirement?.keychain
+        )
+    }
+
+    func retryRotation(username: String) async {
+        guard let forumID = api.forumID,
+              let record = try? database.fetchPushSubscription(
+                forumId: forumID,
+                accountName: username
+              ),
+              record.state == .rotating else { return }
+        do {
+            try await enable(username: username)
+        } catch {
+            debugLog(
+                "[PushSubscriptionCoordinator] rotation retry unavailable: " +
+                    error.localizedDescription
+            )
+        }
+    }
+
+    /// A successful login is a generation boundary. Revoke every older
+    /// subscription for this forum at the relay, including subscriptions that
+    /// belong to another account and therefore cannot be removed with the new
+    /// account's Discourse credential.
+    func rotateSubscriptionsAfterLogin(username: String) async {
+        guard let forumID = api.forumID,
+              let records = try? database.fetchAllPushSubscriptions()
+        else { return }
+
+        var shouldEnableFreshGeneration = false
+        for record in records where record.forumId == forumID {
+            let belongsToCurrentAccount = record.accountName == username
+            let shouldRemainEnabled = belongsToCurrentAccount
+                && record.state != .retiring
+            let targetState: PushSubscriptionRecord.State = shouldRemainEnabled
+                ? .rotating
+                : .retiring
+
+            let retirementCompleted: Bool
+            if let retirement = try? markRetiring(
+                record,
+                username: record.accountName,
+                state: targetState
+            ) {
+                retirementCompleted = await finishRetirement(
+                    record: retirement.record,
+                    secret: retirement.secret,
+                    keychain: retirement.keychain,
+                    allowForumFallback: belongsToCurrentAccount
+                )
+            } else {
+                var tombstone = record
+                tombstone.state = targetState
+                tombstone.updatedAt = Date()
+                try? database.savePushSubscription(tombstone)
+                retirementCompleted = await finishRetirement(
+                    record: tombstone,
+                    secret: nil,
+                    keychain: nil,
+                    allowForumFallback: false
+                )
+            }
+
+            if shouldRemainEnabled, retirementCompleted {
+                shouldEnableFreshGeneration = true
+            }
+        }
+
+        if shouldEnableFreshGeneration {
+            do {
+                try await enable(username: username)
+            } catch {
+                debugLog(
+                    "[PushSubscriptionCoordinator] fresh generation enable failed: " +
+                        error.localizedDescription
+                )
+            }
+        }
+    }
+
+    /// Revoke an old account by endpoint capability only. The current
+    /// account's forum credential is deliberately never sent for this path.
+    func revokeSubscriptionForDifferentAccount(username: String) async {
+        guard let forumID = api.forumID,
+              let record = try? database.fetchPushSubscription(
+                forumId: forumID,
+                accountName: username
+              ) else { return }
+        retireLocally(record)
+        await finishRetirement(
+            record: record,
+            secret: nil,
+            keychain: nil,
+            allowForumFallback: false
+        )
+    }
+
+    /// Immediately disables every subscription for this forum without
+    /// destroying the information required for a future authenticated retry.
+    /// Used when the forum has already rejected the current credential.
+    func retireLocalSubscriptions() {
+        guard let forumID = api.forumID,
+              let records = try? database.fetchAllPushSubscriptions()
+        else { return }
+        for record in records where record.forumId == forumID {
+            retireLocally(record)
+        }
+    }
+
+    private func retireLocally(_ record: PushSubscriptionRecord) {
+        do {
+            _ = try markRetiring(record, username: record.accountName)
+        } catch {
+            // Even if the shared Keychain item is already unavailable, keep
+            // the database tombstone instead of treating the subscription as
+            // active or losing the endpoint needed for future diagnosis.
+            var retiring = record
+            retiring.state = .retiring
+            retiring.updatedAt = Date()
+            do {
+                try database.savePushSubscription(retiring)
+            } catch {
+                debugLog(
+                    "[PushSubscriptionCoordinator] failed to retire local subscription: " +
+                        error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private typealias Retirement = (
+        record: PushSubscriptionRecord,
+        secret: StoredWebPushSubscription,
+        keychain: PushKeychainStore
+    )
+
+    private func markRetiring(
+        _ record: PushSubscriptionRecord,
+        username: String,
+        state: PushSubscriptionRecord.State = .retiring
+    ) throws -> Retirement {
         let keychain = try PushKeychainStore(
             accessGroup: PushConfiguration.loadKeychainAccessGroup()
         )
@@ -234,77 +461,117 @@ final class PushSubscriptionCoordinator {
             username: username,
             from: keychain
         )
-        try await api.unsubscribePush(
-            endpoint: record.endpoint,
-            p256dh: secret.keyMaterial.p256dh,
-            auth: secret.keyMaterial.auth
-        )
-        if let previousEndpoint = record.previousEndpoint {
-            try await api.unsubscribePush(
-                endpoint: previousEndpoint,
-                p256dh: secret.keyMaterial.p256dh,
-                auth: secret.keyMaterial.auth
+        let mutedSecret = secret.settingDeliveryEnabled(false)
+        if secret.deliveryEnabled {
+            try keychain.save(mutedSecret)
+        }
+
+        var retiring = record
+        retiring.state = state
+        retiring.updatedAt = Date()
+        do {
+            try database.savePushSubscription(retiring)
+        } catch {
+            if secret.deliveryEnabled {
+                try? keychain.save(secret)
+            }
+            throw error
+        }
+        return (retiring, mutedSecret, keychain)
+    }
+
+    @discardableResult
+    private func finishRetirement(
+        record: PushSubscriptionRecord,
+        secret: StoredWebPushSubscription?,
+        keychain: PushKeychainStore?,
+        allowForumFallback: Bool = true
+    ) async -> Bool {
+        if record.expiresAt > Date() {
+            if await revokeAtRelay(record) {
+                if record.state != .rotating {
+                    cleanupRetirement(record: record, keychain: keychain)
+                }
+                return true
+            }
+            guard allowForumFallback, let secret else { return false }
+            let failedEndpoints = await failedUnsubscriptions(
+                [record.endpoint] + record.supersededEndpoints,
+                secret: secret
+            )
+            if let firstFailedEndpoint = failedEndpoints.first {
+                var retry = record
+                retry.endpoint = firstFailedEndpoint
+                retry.supersededEndpoints = Array(failedEndpoints.dropFirst())
+                retry.updatedAt = Date()
+                try? database.savePushSubscription(retry)
+                return false
+            }
+        }
+
+        if record.state != .rotating {
+            cleanupRetirement(record: record, keychain: keychain)
+        }
+        return true
+    }
+
+    private func revokeAtRelay(_ record: PushSubscriptionRecord) async -> Bool {
+        do {
+            let configuration = try PushConfiguration.load()
+            try await PushRelayAPI(baseURL: configuration.relayBaseURL)
+                .revokeEndpoint(record.endpoint)
+            return true
+        } catch {
+            debugLog(
+                "[PushSubscriptionCoordinator] relay revocation failed: " +
+                    error.localizedDescription
+            )
+            return false
+        }
+    }
+
+    private func cleanupRetirement(
+        record: PushSubscriptionRecord,
+        keychain providedKeychain: PushKeychainStore?
+    ) {
+        let keychain = providedKeychain ?? (try? PushKeychainStore(
+            accessGroup: PushConfiguration.loadKeychainAccessGroup()
+        ))
+        do {
+            try keychain?.delete(subscriptionID: record.subscriptionID)
+            try database.deletePushSubscription(subscriptionID: record.subscriptionID)
+        } catch {
+            debugLog(
+                "[PushSubscriptionCoordinator] retirement cleanup failed: " +
+                    error.localizedDescription
             )
         }
-        try database.deletePushSubscription(subscriptionID: record.subscriptionID)
-        try keychain.delete(subscriptionID: record.subscriptionID)
     }
 
-    /// Logout must not be blocked by an unreachable forum or an expired
-    /// credential. Try to unregister every known endpoint, then always remove
-    /// the local decryption material and database record.
-    func disableForLogout(username: String) async {
-        guard let forumID = api.forumID else { return }
-        guard let record = try? database.fetchPushSubscription(
-                forumId: forumID,
-                accountName: username
-              ) else {
-            discardLocalSubscriptions()
-            return
-        }
-
-        let keychain = try? PushKeychainStore(
-            accessGroup: PushConfiguration.loadKeychainAccessGroup()
-        )
-        let secret = keychain.flatMap {
-            try? loadSecret(record.subscriptionID, username: username, from: $0)
-        }
-
-        if let secret {
-            var endpoints = [record.endpoint]
-            if let previousEndpoint = record.previousEndpoint {
-                endpoints.append(previousEndpoint)
-            }
-            for endpoint in endpoints {
-                do {
-                    try await api.unsubscribePush(
-                        endpoint: endpoint,
-                        p256dh: secret.keyMaterial.p256dh,
-                        auth: secret.keyMaterial.auth
-                    )
-                } catch {
-                    debugLog("[PushSubscriptionCoordinator] best-effort logout unsubscribe failed: \(error.localizedDescription)")
-                }
+    private func failedUnsubscriptions(
+        _ endpoints: [String],
+        secret: StoredWebPushSubscription
+    ) async -> [String] {
+        var failed: [String] = []
+        var attempted = Set<String>()
+        for endpoint in endpoints {
+            guard !endpoint.isEmpty,
+                  attempted.insert(endpoint).inserted else { continue }
+            do {
+                try await api.unsubscribePush(
+                    endpoint: endpoint,
+                    p256dh: secret.keyMaterial.p256dh,
+                    auth: secret.keyMaterial.auth
+                )
+            } catch {
+                failed.append(endpoint)
+                debugLog(
+                    "[PushSubscriptionCoordinator] endpoint unsubscribe failed: " +
+                        error.localizedDescription
+                )
             }
         }
-
-        discardLocalSubscriptions()
-    }
-
-    /// Drops every local subscription for this forum without contacting it.
-    /// Used after the forum has already rejected the current authentication.
-    func discardLocalSubscriptions() {
-        guard let forumID = api.forumID,
-              let records = try? database.fetchAllPushSubscriptions()
-        else { return }
-        let keychain = try? PushKeychainStore(
-            accessGroup: PushConfiguration.loadKeychainAccessGroup()
-        )
-
-        for record in records where record.forumId == forumID {
-            try? database.deletePushSubscription(subscriptionID: record.subscriptionID)
-            try? keychain?.delete(subscriptionID: record.subscriptionID)
-        }
+        return failed
     }
 
     private func loadSecret(

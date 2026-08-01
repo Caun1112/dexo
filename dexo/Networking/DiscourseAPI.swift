@@ -1199,7 +1199,7 @@ final class DiscourseAPI {
         guard isDiscourseAuthenticationFailure(statusCode: statusCode, data: data) else {
             return nil
         }
-        PushSubscriptionCoordinator(api: self).discardLocalSubscriptions()
+        PushSubscriptionCoordinator(api: self).retireLocalSubscriptions()
         AuthManager.shared.invalidateExpiredAuthentication(for: baseURL)
         let messages = data
             .flatMap { try? JSONDecoder().decode(DiscourseErrorResponse.self, from: $0) }
