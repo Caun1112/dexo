@@ -1,5 +1,6 @@
 What to Test
 
+- Trigger a new-topic notification from a watched category or tag. Confirm the notification title reads “@username created a topic”, the line below contains only the topic title (not the first post excerpt), and tapping it opens the new topic.
 - Test with the updated push relay deployed. Upgrade from an earlier build with push enabled, trigger a reply or mention, and confirm valid notifications still decrypt and open the correct forum and post.
 - With push enabled, go offline and sign out, then restore the network and trigger notifications for the old account. A generic encrypted fallback may appear once; confirm later pushes from that obsolete subscription stop after the relay retires it.
 - Sign in to a different account on the same forum. Confirm the previous account's subscription is retired without using the new account's authorization, and enabling push creates a fresh subscription for the current account.

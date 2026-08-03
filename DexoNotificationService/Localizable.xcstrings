@@ -75,13 +75,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "@%@ created a new topic"
+            "value" : "@%@ created a topic"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "@%@ 发布了新主题"
+            "value" : "@%@ 创建了主题"
           }
         }
       }
@@ -184,6 +184,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新的论坛通知"
+          }
+        }
+      }
+    },
+    "push.new_topic.fallback.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Dexo to view the topic."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Dexo 查看主题。"
           }
         }
       }

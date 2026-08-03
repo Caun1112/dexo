@@ -86,7 +86,7 @@ final class NotificationService: UNNotificationServiceExtension {
 
         content.title = payload.compactTitle ?? payload.title
         content.subtitle = ""
-        content.body = payload.body
+        content.body = payload.presentationBody
         let forumContext = applyForumIdentity(
             for: subscription.forumBaseURL,
             to: content
@@ -399,7 +399,7 @@ final class NotificationService: UNNotificationServiceExtension {
         let intent = INSendMessageIntent(
             recipients: [recipient],
             outgoingMessageType: .outgoingMessageText,
-            content: payload.body,
+            content: payload.presentationBody,
             speakableGroupName: nil,
             conversationIdentifier: content.threadIdentifier.isEmpty
                 ? forumIdentity.identifier
@@ -545,6 +545,40 @@ private struct DiscoursePayload: Decodable {
     var compactTitle: String? {
         guard let senderName = compactSenderName else { return nil }
         return notificationKind.compactTitle(senderName: senderName)
+    }
+
+    var presentationBody: String {
+        switch notificationKind {
+        case .watchingFirstPost:
+            return topicTitleFromNotificationTitle
+                ?? String(localized: "push.new_topic.fallback.body")
+        default:
+            return body
+        }
+    }
+
+    private var topicTitleFromNotificationTitle: String? {
+        let quotePairs: [(opening: Character, closing: Character)] = [
+            ("\"", "\""),
+            ("“", "”"),
+            ("„", "“"),
+            ("«", "»"),
+            ("「", "」"),
+            ("『", "』"),
+            ("‹", "›"),
+        ]
+        for pair in quotePairs {
+            guard let openingIndex = title.firstIndex(of: pair.opening),
+                  let closingIndex = title.lastIndex(of: pair.closing),
+                  openingIndex < closingIndex else { continue }
+            let candidate = title[
+                title.index(after: openingIndex)..<closingIndex
+            ].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !candidate.isEmpty {
+                return candidate
+            }
+        }
+        return nil
     }
 
     private static func isUsernameScalar(_ scalar: Unicode.Scalar) -> Bool {
