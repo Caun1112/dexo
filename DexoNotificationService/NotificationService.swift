@@ -528,7 +528,15 @@ private struct DiscoursePayload: Decodable {
     }
 
     var notificationKind: DiscourseNotificationKind {
-        DiscourseNotificationKind(icon: icon)
+        let iconKind = DiscourseNotificationKind(icon: icon)
+        // `watching_category_or_tag` has no dedicated push asset in Discourse,
+        // so the server sends discourse.png even when its title is translated
+        // as `watching_first_post`. Recover that type from the post URL.
+        guard case .other = iconKind,
+              DiscourseNotificationKind.matchesAsset(icon, assetName: "discourse"),
+              targetsFirstPost,
+              topicTitleFromNotificationTitle != nil else { return iconKind }
+        return .watchingFirstPost
     }
 
     var compactSenderName: String? {
@@ -579,6 +587,22 @@ private struct DiscoursePayload: Decodable {
             }
         }
         return nil
+    }
+
+    private var targetsFirstPost: Bool {
+        guard let url,
+              let path = URLComponents(string: url)?.path else { return false }
+        let components = path.split(separator: "/")
+        guard let topicIndex = components.firstIndex(of: "t") else { return false }
+        let tail = Array(components.dropFirst(topicIndex + 1))
+        guard !tail.isEmpty else { return false }
+
+        let topicIDIndex = Int(tail[0]) == nil ? 1 : 0
+        guard tail.indices.contains(topicIDIndex),
+              Int(tail[topicIDIndex]) != nil else { return false }
+        let postNumberIndex = topicIDIndex + 1
+        guard tail.indices.contains(postNumberIndex) else { return false }
+        return Int(tail[postNumberIndex]) == 1
     }
 
     private static func isUsernameScalar(_ scalar: Unicode.Scalar) -> Bool {
