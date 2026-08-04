@@ -1,5 +1,6 @@
 What to Test
 
+- Enable DoH, then open the web login for linux.do and another forum. Confirm both in-app web pages load normally through the selected resolver.
 - Set a category or tag to Watching First Post, then create a topic in it. Confirm this watched-category/tag notification reads “@username created a topic”, the line below contains only the topic title (not the first post excerpt), and tapping it opens the new topic.
 - Test with the updated push relay deployed. Upgrade from an earlier build with push enabled, trigger a reply or mention, and confirm valid notifications still decrypt and open the correct forum and post.
 - With push enabled, go offline and sign out, then restore the network and trigger notifications for the old account. A generic encrypted fallback may appear once; confirm later pushes from that obsolete subscription stop after the relay retires it.

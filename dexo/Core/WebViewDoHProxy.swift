@@ -3,10 +3,11 @@ import Network
 import Security
 import WebKit
 
-/// Applies the app's DoH preference to WKWebView on iOS 17 and later. WebKit
-/// keeps the original HTTPS URL and connects through a loopback CONNECT proxy.
-/// The proxy terminates local TLS, while URLSession performs upstream TLS with
-/// the app's encrypted resolver configuration.
+/// Applies the app's global DoH preference to every production WKWebView on
+/// iOS 17 and later, regardless of the forum host. WebKit keeps the original
+/// HTTPS URL and connects through a loopback CONNECT proxy. The proxy
+/// terminates local TLS, while URLSession performs upstream TLS with the app's
+/// encrypted resolver configuration.
 enum WebViewDoHConfigurator {
     static func configure(_ configuration: WKWebViewConfiguration) async throws -> AnyObject? {
         guard #available(iOS 17.0, *) else { return nil }

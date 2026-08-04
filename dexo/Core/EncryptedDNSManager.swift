@@ -4,6 +4,8 @@ import Network
 final class EncryptedDNSManager {
     static let shared = EncryptedDNSManager()
 
+    // The default privacy context is intentionally app-wide: enabling DoH
+    // applies to DNS resolution for every forum, not a host allowlist.
     private let privacyContext = NWParameters.PrivacyContext.default
 
     private init() {}
@@ -23,8 +25,8 @@ final class EncryptedDNSManager {
         )
     }
 
-    /// Updates encrypted name resolution for subsequent connections and
-    /// clears DNS/TLS state associated with the default privacy context.
+    /// Updates encrypted name resolution for subsequent connections across
+    /// all forums and clears DNS/TLS state associated with the default context.
     @discardableResult
     func setEnabled(_ enabled: Bool, serverURLString: String) -> Bool {
         guard enabled else {
