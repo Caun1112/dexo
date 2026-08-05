@@ -40,7 +40,6 @@ final class SettingsViewController: ObservableViewController {
         _ = settings.dohEnabled
         _ = settings.dohServers
         _ = settings.defaultDoHServerID
-        _ = settings.localBlocklistRevision
         tableView.reloadData()
     }
 
@@ -76,8 +75,6 @@ final class SettingsViewController: ObservableViewController {
     private enum GeneralRow: Int, CaseIterable {
         case autoOpen
         case boostDisplay
-        case followedUsers
-        case localBlocklist
     }
 
     private func networkRows() -> [NetworkRow] {
@@ -153,10 +150,6 @@ extension SettingsViewController: UITableViewDataSource {
                 return makeAutoOpenCell(tableView, indexPath: indexPath)
             case .boostDisplay:
                 return makeBoostDisplayCell(tableView, indexPath: indexPath)
-            case .followedUsers:
-                return makeFollowedUsersCell(tableView, indexPath: indexPath)
-            case .localBlocklist:
-                return makeLocalBlocklistCell(tableView, indexPath: indexPath)
             }
         case .appearance:
             switch AppearanceRow(rawValue: indexPath.row)! {
@@ -267,32 +260,6 @@ extension SettingsViewController: UITableViewDataSource {
         return cell
     }
 
-    private func makeLocalBlocklistCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
-        applyFonts(to: cell)
-        cell.textLabel?.text = String(localized: "settings.local_blocklist")
-        cell.detailTextLabel?.text = String(
-            localized: "settings.local_blocklist.count \(settings.localBlockedUsers.count) \(AppSettings.maximumLocalBlockedUsers)"
-        )
-        cell.imageView?.image = UIImage(systemName: "eye.slash")
-        cell.imageView?.tintColor = ThemeManager.shared.accentColor
-        cell.accessoryType = .disclosureIndicator
-        return cell
-    }
-
-    private func makeFollowedUsersCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
-        applyFonts(to: cell)
-        cell.textLabel?.text = String(localized: "settings.following")
-        cell.detailTextLabel?.font = FontManager.shared.font(size: 13)
-        cell.detailTextLabel?.text = String(localized: "settings.following.linux_do_only")
-        cell.detailTextLabel?.textColor = .secondaryLabel
-        cell.imageView?.image = UIImage(systemName: "person.2")
-        cell.imageView?.tintColor = ThemeManager.shared.accentColor
-        cell.accessoryType = .disclosureIndicator
-        return cell
-    }
-
     private func makeDoHSettingsCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
         applyFonts(to: cell)
@@ -391,10 +358,6 @@ extension SettingsViewController: UITableViewDelegate {
                 break
             case .boostDisplay:
                 showBoostDisplayPicker(from: sourceView)
-            case .followedUsers:
-                showFollowedUsers()
-            case .localBlocklist:
-                navigationController?.pushViewController(LocalBlocklistViewController(), animated: true)
             }
         case .appearance:
             switch AppearanceRow(rawValue: indexPath.row)! {
@@ -501,39 +464,6 @@ extension SettingsViewController {
         }
         alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
         Self.anchorPopover(alert, to: sourceView)
-        present(alert, animated: true)
-    }
-
-    private func showFollowedUsers() {
-        guard let forum = try? DatabaseManager.shared.fetchAllForums().first(where: {
-            URL(string: $0.baseURL)?.host?.lowercased() == "linux.do"
-        }) else {
-            showFollowingRequirement(message: String(localized: "settings.following.forum_required"))
-            return
-        }
-
-        let authManager = AuthManager.shared
-        let baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard authManager.isAuthenticated(for: baseURL),
-              let username = authManager.username(for: baseURL) ?? forum.username,
-              !username.isEmpty
-        else {
-            showFollowingRequirement(message: String(localized: "settings.following.login_required"))
-            return
-        }
-
-        navigationController?.pushViewController(
-            FollowedUsersViewController(
-                api: DiscourseAPI(forum: forum),
-                currentUsername: username
-            ),
-            animated: true
-        )
-    }
-
-    private func showFollowingRequirement(message: String) {
-        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
         present(alert, animated: true)
     }
 

@@ -2,6 +2,7 @@ import UIKit
 
 final class LocalBlocklistViewController: ObservableViewController {
     private let settings = AppSettings.shared
+    private let baseURL: String
     private var entries: [AppSettings.LocalBlockedUser] = []
 
     private lazy var tableView: UITableView = {
@@ -9,12 +10,13 @@ final class LocalBlocklistViewController: ObservableViewController {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.rowHeight = 56
         return tableView
     }()
 
     private let emptyLabel: UILabel = {
         let label = UILabel()
-        label.text = String(localized: "settings.local_blocklist.empty")
+        label.text = String(localized: "me.local_blocklist.empty")
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
@@ -22,9 +24,19 @@ final class LocalBlocklistViewController: ObservableViewController {
         return label
     }()
 
+    init(baseURL: String) {
+        self.baseURL = baseURL
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = String(localized: "settings.local_blocklist")
+        title = String(localized: "me.local_blocklist")
         view.addSubview(tableView)
         view.addSubview(emptyLabel)
 
@@ -42,7 +54,7 @@ final class LocalBlocklistViewController: ObservableViewController {
 
     override func updateUI() {
         _ = settings.localBlocklistRevision
-        entries = settings.localBlockedUsers
+        entries = settings.localBlockedUsers(for: baseURL)
         emptyLabel.isHidden = !entries.isEmpty
         tableView.reloadData()
     }
@@ -57,19 +69,17 @@ extension LocalBlocklistViewController: UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let entry = entries[indexPath.row]
-        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
-        cell.textLabel?.font = FontManager.shared.font(size: 17)
-        cell.detailTextLabel?.font = FontManager.shared.font(size: 13)
-        cell.textLabel?.text = "@\(entry.username)"
-        cell.detailTextLabel?.text = URL(string: entry.forumBaseURL)?.host ?? entry.forumBaseURL
-        cell.detailTextLabel?.textColor = .secondaryLabel
-        cell.imageView?.image = UIImage(systemName: "person.crop.circle.badge.xmark")
-        cell.imageView?.tintColor = ThemeManager.shared.accentColor
+        let cell = UITableViewCell()
+        var content = cell.defaultContentConfiguration()
+        content.text = "@\(entry.username)"
+        content.image = UIImage(systemName: "person.crop.circle.badge.xmark")
+        content.imageProperties.tintColor = ThemeManager.shared.accentColor
+        cell.contentConfiguration = content
         return cell
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        String(localized: "settings.local_blocklist.footer \(AppSettings.maximumLocalBlockedUsers)")
+        String(localized: "me.local_blocklist.footer \(AppSettings.maximumLocalBlockedUsers)")
     }
 
     func tableView(

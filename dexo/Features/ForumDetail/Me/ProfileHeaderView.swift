@@ -116,9 +116,12 @@ final class ProfileHeaderView: UIView {
         var config = UIButton.Configuration.filled()
         config.cornerStyle = .capsule
         config.imagePadding = 6
+        config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 14, bottom: 7, trailing: 14)
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isHidden = true
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
         button.addAction(UIAction { [weak self] _ in
             self?.onFollowTapped?()
         }, for: .touchUpInside)
@@ -128,21 +131,26 @@ final class ProfileHeaderView: UIView {
     private lazy var localBlockButton: UIButton = {
         var config = UIButton.Configuration.tinted()
         config.cornerStyle = .capsule
-        config.imagePadding = 6
+        config.imagePadding = 5
+        config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isHidden = true
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
         button.addAction(UIAction { [weak self] _ in
             self?.onLocalBlockTapped?()
         }, for: .touchUpInside)
         return button
     }()
 
+    private let profileActionSpacer = UIView()
+
     private let profileActionsStack: UIStackView = {
         let stack = UIStackView()
         stack.axis = .horizontal
-        stack.alignment = .fill
-        stack.distribution = .fillEqually
+        stack.alignment = .center
+        stack.distribution = .fill
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.isHidden = true
@@ -215,6 +223,7 @@ final class ProfileHeaderView: UIView {
         avatarNameRow.translatesAutoresizingMaskIntoConstraints = false
 
         profileActionsStack.addArrangedSubview(followButton)
+        profileActionsStack.addArrangedSubview(profileActionSpacer)
         profileActionsStack.addArrangedSubview(localBlockButton)
 
         loggedInContainer.addArrangedSubview(avatarNameRow)
@@ -246,6 +255,8 @@ final class ProfileHeaderView: UIView {
             avatarHeightConstraint,
             messageButton.widthAnchor.constraint(equalToConstant: Self.messageButtonSize),
             messageButton.heightAnchor.constraint(equalToConstant: Self.messageButtonSize),
+            followButton.heightAnchor.constraint(equalToConstant: 38),
+            localBlockButton.heightAnchor.constraint(equalToConstant: 38),
 
             // Horizontal insets align with the `.insetGrouped` cell content start
             // (section inset 20pt + cell layout margin ~12pt), using
@@ -381,23 +392,25 @@ final class ProfileHeaderView: UIView {
         followButton.isHidden = !isVisible
         followButton.isEnabled = !isLoading
 
-        var config = isFollowing
-            ? UIButton.Configuration.tinted()
-            : UIButton.Configuration.filled()
-        let title = isFollowing
+        var config = isFollowing ? UIButton.Configuration.tinted() : UIButton.Configuration.filled()
+        let visibleTitle = isFollowing
+            ? String(localized: "user.following")
+            : String(localized: "user.follow")
+        let actionTitle = isFollowing
             ? String(localized: "user.unfollow")
             : String(localized: "user.follow")
-        config.title = title
-        config.image = UIImage(systemName: isFollowing ? "person.badge.minus" : "person.badge.plus")
+        config.title = visibleTitle
+        config.image = UIImage(systemName: isFollowing ? "checkmark" : "person.badge.plus")
         config.imagePadding = 6
+        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 14, bottom: 7, trailing: 14)
         config.cornerStyle = .capsule
         config.showsActivityIndicator = isLoading
-        if isFollowing {
-            config.baseForegroundColor = theme.accentColor
-        }
+        config.baseForegroundColor = isFollowing ? theme.accentColor : nil
         config.baseBackgroundColor = theme.accentColor
         followButton.configuration = config
-        followButton.accessibilityLabel = title
+        followButton.accessibilityLabel = actionTitle
+        followButton.accessibilityTraits = isFollowing ? [.button, .selected] : .button
     }
 
     private func configureLocalBlockButton(
@@ -407,22 +420,23 @@ final class ProfileHeaderView: UIView {
     ) {
         localBlockButton.isHidden = !isVisible
 
-        var config = isBlocked
-            ? UIButton.Configuration.filled()
-            : UIButton.Configuration.tinted()
-        let title = isBlocked
+        var config = UIButton.Configuration.tinted()
+        let actionTitle = isBlocked
             ? String(localized: "user.local_unblock")
             : String(localized: "user.local_block")
-        config.title = title
-        config.image = UIImage(systemName: isBlocked ? "eye" : "eye.slash")
-        config.imagePadding = 6
+        config.title = isBlocked
+            ? String(localized: "user.local_blocked")
+            : String(localized: "user.local_block.compact")
+        config.image = UIImage(systemName: isBlocked ? "checkmark" : "person.crop.circle.badge.xmark")
+        config.imagePadding = 5
+        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
         config.cornerStyle = .capsule
-        config.baseBackgroundColor = theme.accentColor
-        if !isBlocked {
-            config.baseForegroundColor = theme.accentColor
-        }
+        config.baseForegroundColor = isBlocked ? .systemRed : .secondaryLabel
+        config.baseBackgroundColor = isBlocked ? .systemRed : theme.backgroundColor
         localBlockButton.configuration = config
-        localBlockButton.accessibilityLabel = title
+        localBlockButton.accessibilityLabel = actionTitle
+        localBlockButton.accessibilityTraits = isBlocked ? [.button, .selected] : .button
     }
 
     private func formatJoinDate(_ dateString: String) -> String {

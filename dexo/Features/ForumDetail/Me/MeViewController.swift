@@ -1,6 +1,16 @@
 import UIKit
 
 final class MeViewController: ObservableViewController {
+    private enum AccountRow {
+        case notifications
+        case bookmarks
+        case read
+        case following
+        case localBlocklist
+        case pushNotifications
+        case challenge
+    }
+
     private let api: DiscourseAPI
     private let viewModel: MeViewModel
     private weak var authGate: AuthGating?
@@ -117,6 +127,7 @@ final class MeViewController: ObservableViewController {
         let currentUser = viewModel.currentUser
         let userProfile = viewModel.userProfile
         let summary = viewModel.summary
+        _ = AppSettings.shared.localBlocklistRevision
         // The notification badge is rendered by the table view data source.
         // Read it directly in the tracking scope so clearing the poller state
         // reliably invalidates this screen even when reloadData() defers cells.
@@ -280,9 +291,7 @@ extension MeViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch section {
         case 0:
-            let isLoggedIn = authGate?.isAuthenticated() ?? false
-            guard isLoggedIn else { return 0 }
-            return showChallengeRow ? 5 : 4
+            return accountRows.count
         case 1:
             return 1
         default:
@@ -295,33 +304,59 @@ extension MeViewController: UITableViewDataSource {
         return KeychainHelper.getUserApiKey(for: api.baseURL) == AuthManager.webAuthSentinel
     }
 
+    private var accountRows: [AccountRow] {
+        guard authGate?.isAuthenticated() == true else { return [.localBlocklist] }
+        var rows: [AccountRow] = [.notifications, .bookmarks, .read]
+        if api.isLinuxDo {
+            rows.append(.following)
+        }
+        rows.append(.localBlocklist)
+        rows.append(.pushNotifications)
+        if showChallengeRow {
+            rows.append(.challenge)
+        }
+        return rows
+    }
+
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         switch indexPath.section {
         case 0:
             let cell = UITableViewCell()
-            var content = cell.defaultContentConfiguration()
+            let row = accountRows[indexPath.row]
+            var content: UIListContentConfiguration
+            if case .localBlocklist = row {
+                content = .valueCell()
+            } else {
+                content = cell.defaultContentConfiguration()
+            }
             var showDot = false
-            switch indexPath.row {
-            case 0:
+            switch row {
+            case .notifications:
                 content.image = UIImage(systemName: "bell")
                 content.text = String(localized: "me.notifications")
                 showDot = notificationPoller?.hasUnreadNotifications ?? false
-            case 1:
+            case .bookmarks:
                 content.image = UIImage(systemName: "bookmark")
                 content.text = String(localized: "me.bookmarks")
-            case 2:
+            case .read:
                 content.image = UIImage(systemName: "checkmark.circle")
                 content.text = String(localized: "me.read")
-            case 3:
+            case .following:
+                content.image = UIImage(systemName: "person.2")
+                content.text = String(localized: "me.following")
+            case .localBlocklist:
+                content.image = UIImage(systemName: "person.crop.circle.badge.xmark")
+                content.text = String(localized: "me.local_blocklist")
+                let count = AppSettings.shared.localBlockedUsers(for: api.baseURL).count
+                content.secondaryText = String(localized: "me.local_blocklist.count \(count)")
+            case .pushNotifications:
                 content.image = UIImage(systemName: "bell.badge")
                 content.text = String(localized: "push.settings.title")
-            case 4:
+            case .challenge:
                 content.image = UIImage(systemName: "shield")
                 content.text = String(localized: "me.challenge")
-            default:
-                break
             }
-            content.imageProperties.tintColor = .tintColor
+            content.imageProperties.tintColor = ThemeManager.shared.accentColor
             content.imageProperties.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 16, weight: .regular)
             cell.contentConfiguration = content
             cell.accessoryType = .disclosureIndicator
@@ -362,30 +397,42 @@ extension MeViewController: UITableViewDelegate {
 
         switch indexPath.section {
         case 0:
-            switch indexPath.row {
-            case 0:
+            guard accountRows.indices.contains(indexPath.row) else { return }
+            switch accountRows[indexPath.row] {
+            case .notifications:
                 notificationPoller?.clearNotifications()
                 tableView.reloadRows(at: [indexPath], with: .none)
                 let vc = NotificationsViewController(api: api, authGate: authGate)
                 navigationController?.pushViewController(vc, animated: true)
-            case 1:
+            case .bookmarks:
                 guard let username = viewModel.currentUser?.username else { return }
                 let vc = BookmarksViewController(api: api, username: username)
                 navigationController?.pushViewController(vc, animated: true)
-            case 2:
+            case .read:
                 let vc = ReadTopicsViewController(api: api)
                 navigationController?.pushViewController(vc, animated: true)
-            case 3:
+            case .following:
+                guard let username = viewModel.currentUser?.username
+                    ?? AuthManager.shared.username(for: api.baseURL)
+                else { return }
+                navigationController?.pushViewController(
+                    FollowedUsersViewController(api: api, currentUsername: username),
+                    animated: true
+                )
+            case .localBlocklist:
+                navigationController?.pushViewController(
+                    LocalBlocklistViewController(baseURL: api.baseURL),
+                    animated: true
+                )
+            case .pushNotifications:
                 guard let username = viewModel.currentUser?.username else { return }
                 let viewController = PushNotificationSettingsViewController(
                     api: api,
                     username: username
                 )
                 navigationController?.pushViewController(viewController, animated: true)
-            case 4:
+            case .challenge:
                 presentChallenge()
-            default:
-                break
             }
         case 1:
             let isLoggedIn = authGate?.isAuthenticated() ?? false

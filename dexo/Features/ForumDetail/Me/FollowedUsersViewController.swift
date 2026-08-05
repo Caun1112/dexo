@@ -97,7 +97,7 @@ final class FollowedUsersViewController: ObservableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = String(localized: "settings.following")
+        title = String(localized: "me.following")
 
         loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
@@ -135,7 +135,7 @@ final class FollowedUsersViewController: ObservableViewController {
             loadingIndicator.startAnimating()
         } else {
             loadingIndicator.stopAnimating()
-            stateLabel.text = errorMessage ?? String(localized: "settings.following.empty")
+            stateLabel.text = errorMessage ?? String(localized: "me.following.empty")
             stateLabel.isHidden = !users.isEmpty
         }
         if !isLoading {

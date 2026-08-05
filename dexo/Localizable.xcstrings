@@ -2329,6 +2329,38 @@
         }
       }
     },
+    "me.following" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Following"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关注列表"
+          }
+        }
+      }
+    },
+    "me.following.empty" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You aren't following anyone yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂未关注任何用户"
+          }
+        }
+      }
+    },
     "me.joined_date %@" : {
       "localizations" : {
         "en" : {
@@ -2341,6 +2373,70 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入于 %@"
+          }
+        }
+      }
+    },
+    "me.local_blocklist" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local Blocklist"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地黑名单"
+          }
+        }
+      }
+    },
+    "me.local_blocklist.count %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld blocked"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已拉黑 %lld 人"
+          }
+        }
+      }
+    },
+    "me.local_blocklist.empty" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No locally blocked users"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无本地黑名单用户"
+          }
+        }
+      }
+    },
+    "me.local_blocklist.footer %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stored only on this device. Up to %lld users can be blocked across all forums."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "黑名单仅保存在本机，所有论坛合计最多可添加 %lld 个用户。"
           }
         }
       }
@@ -4226,150 +4322,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "展开"
-          }
-        }
-      }
-    },
-    "settings.local_blocklist" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local Blocklist"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本地黑名单"
-          }
-        }
-      }
-    },
-    "settings.local_blocklist.count %lld %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld/%2$lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld/%2$lld"
-          }
-        }
-      }
-    },
-    "settings.local_blocklist.empty" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No locally blocked users"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂无本地黑名单用户"
-          }
-        }
-      }
-    },
-    "settings.local_blocklist.footer %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stored only on this device. Up to %lld users can be blocked across all forums."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "黑名单仅保存在本机，所有论坛合计最多可添加 %lld 个用户。"
-          }
-        }
-      }
-    },
-    "settings.following" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Following"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关注列表"
-          }
-        }
-      }
-    },
-    "settings.following.empty" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "You aren't following anyone yet"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂未关注任何用户"
-          }
-        }
-      }
-    },
-    "settings.following.forum_required" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add linux.do before viewing your following list."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先添加 linux.do 论坛，再查看关注列表。"
-          }
-        }
-      }
-    },
-    "settings.following.linux_do_only" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "linux.do only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅支持 linux.do"
-          }
-        }
-      }
-    },
-    "settings.following.login_required" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign in to linux.do before viewing your following list."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先登录 linux.do，再查看关注列表。"
           }
         }
       }
@@ -7355,6 +7307,22 @@
         }
       }
     },
+    "user.following" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Following"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已关注"
+          }
+        }
+      }
+    },
     "user.local_block" : {
       "localizations" : {
         "en" : {
@@ -7367,6 +7335,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入黑名单"
+          }
+        }
+      }
+    },
+    "user.local_block.compact" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拉黑"
+          }
+        }
+      }
+    },
+    "user.local_blocked" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocked"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已拉黑"
           }
         }
       }
