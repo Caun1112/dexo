@@ -153,6 +153,7 @@ final class TopicRenderPipelineTests: XCTestCase {
         XCTAssertEqual(VirtualTopicItem.footer(42).longPressPostId, 42)
         XCTAssertEqual(VirtualTopicItem.boosts(42).longPressPostId, 42)
         XCTAssertEqual(VirtualTopicItem.collapsed(42).longPressPostId, 42)
+        XCTAssertNil(VirtualTopicItem.blocked(42).longPressPostId)
         XCTAssertNil(VirtualTopicItem.title(1).longPressPostId)
         XCTAssertNil(VirtualTopicItem.loadMoreChildren(42).longPressPostId)
         XCTAssertNil(VirtualTopicItem.paginationStatus.longPressPostId)
@@ -183,6 +184,10 @@ final class TopicRenderPipelineTests: XCTestCase {
         ]
 
         XCTAssertEqual(VirtualTopicPrependAnchorSelector.firstPostItem(in: items), .header(100))
+        XCTAssertEqual(VirtualTopicPrependAnchorSelector.firstPostItem(in: [
+            .title(1),
+            .blocked(100),
+        ]), .blocked(100))
         XCTAssertNil(VirtualTopicPrependAnchorSelector.firstPostItem(in: [
             .title(1),
             .paginationStatus,

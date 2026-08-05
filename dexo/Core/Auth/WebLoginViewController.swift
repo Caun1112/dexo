@@ -10,10 +10,17 @@ final class WebLoginViewController: BaseViewController {
     private var webView: WKWebView?
     private var proxyLease: AnyObject?
     private var setupTask: Task<Void, Never>?
+    private var diagnosticEntries: [String] = []
+    private var diagnosticsRequested = false
+
+    private lazy var diagnostics = WebLoginDiagnostics { [weak self] event in
+        self?.appendDiagnostic(event)
+    }
 
     private func makeWebViewConfiguration() async throws -> (WKWebViewConfiguration, AnyObject?) {
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        diagnostics.register(with: config)
 
         // Polyfills for iOS < 16.4: CSS.supports override for browser detection,
         // API polyfills, and static{} block transpilation for Webpack chunks.
@@ -46,6 +53,34 @@ final class WebLoginViewController: BaseViewController {
 
     private var progressObservation: NSKeyValueObservation?
 
+    private lazy var doneButton = UIBarButtonItem(
+        title: String(localized: "weblogin.done"),
+        style: .done,
+        target: self,
+        action: #selector(doneTapped)
+    )
+
+    private lazy var debugButton = UIBarButtonItem(
+        title: String(localized: "weblogin.debug"),
+        style: .plain,
+        target: self,
+        action: #selector(debugTapped)
+    )
+
+    private lazy var diagnosticTextView: UITextView = {
+        let textView = UITextView()
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.textContainerInset = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        textView.layer.cornerRadius = 12
+        textView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        textView.accessibilityLabel = String(localized: "weblogin.debug.title")
+        textView.isHidden = true
+        return textView
+    }()
+
     init(targetURL: URL, onSuccess: @escaping ([HTTPCookie], String?) -> Void) {
         self.targetURL = targetURL
         self.onSuccess = onSuccess
@@ -62,21 +97,31 @@ final class WebLoginViewController: BaseViewController {
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped)
         )
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: String(localized: "weblogin.done"), style: .done, target: self, action: #selector(doneTapped)
-        )
-        navigationItem.rightBarButtonItem?.isEnabled = false
+        doneButton.isEnabled = false
+        navigationItem.rightBarButtonItems = [doneButton, debugButton]
 
         view.addSubview(progressView)
+        view.addSubview(diagnosticTextView)
         NSLayoutConstraint.activate([
             progressView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             progressView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            diagnosticTextView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            diagnosticTextView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            diagnosticTextView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            diagnosticTextView.heightAnchor.constraint(equalToConstant: 240),
         ])
+        refreshDiagnosticPanel()
 
         setupTask = Task { [weak self] in
             await self?.setUpWebView()
         }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        diagnosticTextView.backgroundColor = ThemeManager.shared.codeBackgroundColor
+        diagnosticTextView.textColor = .label
     }
 
     private func setUpWebView() async {
@@ -106,7 +151,10 @@ final class WebLoginViewController: BaseViewController {
                 self?.progressView.progress = Float(webView.estimatedProgress)
                 self?.progressView.isHidden = webView.estimatedProgress >= 1.0
             }
-            navigationItem.rightBarButtonItem?.isEnabled = true
+            doneButton.isEnabled = true
+            if diagnosticsRequested {
+                diagnostics.enable(in: webView)
+            }
             webView.load(URLRequest(url: targetURL))
         } catch {
             guard !Task.isCancelled else { return }
@@ -136,6 +184,47 @@ final class WebLoginViewController: BaseViewController {
     @objc private func doneTapped() {
         guard let webView else { return }
         coordinator.collectAndFire(from: webView)
+    }
+
+    @objc private func debugTapped() {
+        if diagnosticsRequested {
+            diagnosticsRequested = false
+            diagnostics.disable(in: webView)
+            diagnosticTextView.isHidden = true
+            debugButton.title = String(localized: "weblogin.debug")
+            return
+        }
+
+        diagnosticsRequested = true
+        diagnosticTextView.isHidden = false
+        debugButton.title = String(localized: "weblogin.debug.close")
+        appendDiagnostic(String(localized: "weblogin.debug.enabled"))
+
+        guard let webView else { return }
+        diagnostics.enable(in: webView)
+        // The page must load after instrumentation is installed so login API
+        // calls made during boot are visible in the diagnostic panel.
+        webView.reload()
+    }
+
+    private func appendDiagnostic(_ event: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        diagnosticEntries.append("[\(formatter.string(from: Date()))] \(event)")
+        if diagnosticEntries.count > 100 {
+            diagnosticEntries.removeFirst(diagnosticEntries.count - 100)
+        }
+        refreshDiagnosticPanel()
+    }
+
+    private func refreshDiagnosticPanel() {
+        diagnosticTextView.text = diagnosticEntries.isEmpty
+            ? String(localized: "weblogin.debug.empty")
+            : diagnosticEntries.joined(separator: "\n\n")
+        guard !diagnosticEntries.isEmpty else { return }
+        diagnosticTextView.scrollRangeToVisible(
+            NSRange(location: diagnosticTextView.text.utf16.count, length: 0)
+        )
     }
 
     private func handleCookiesReady(_ cookies: [HTTPCookie]) {

@@ -20,6 +20,10 @@ final class ProfileHeaderView: UIView {
     /// Invoked when the message button beside the profile identity is tapped.
     /// Own profile → navigate to the DM inbox; other profile → compose a new DM.
     var onMessageTapped: (() -> Void)?
+    /// Invoked when the linux.do follow/unfollow button is tapped.
+    var onFollowTapped: (() -> Void)?
+    /// Invoked when the local blocklist button is tapped.
+    var onLocalBlockTapped: (() -> Void)?
 
     private static let baseAvatarSize: CGFloat = 68
     private static let messageButtonSize: CGFloat = 44
@@ -108,6 +112,43 @@ final class ProfileHeaderView: UIView {
         return button
     }()
 
+    private lazy var followButton: UIButton = {
+        var config = UIButton.Configuration.filled()
+        config.cornerStyle = .capsule
+        config.imagePadding = 6
+        let button = UIButton(configuration: config)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isHidden = true
+        button.addAction(UIAction { [weak self] _ in
+            self?.onFollowTapped?()
+        }, for: .touchUpInside)
+        return button
+    }()
+
+    private lazy var localBlockButton: UIButton = {
+        var config = UIButton.Configuration.tinted()
+        config.cornerStyle = .capsule
+        config.imagePadding = 6
+        let button = UIButton(configuration: config)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isHidden = true
+        button.addAction(UIAction { [weak self] _ in
+            self?.onLocalBlockTapped?()
+        }, for: .touchUpInside)
+        return button
+    }()
+
+    private let profileActionsStack: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .fill
+        stack.distribution = .fillEqually
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.isHidden = true
+        return stack
+    }()
+
     // Login prompt state
     private let loginPromptLabel: UILabel = {
         let label = UILabel()
@@ -173,16 +214,20 @@ final class ProfileHeaderView: UIView {
         avatarNameRow.setCustomSpacing(8, after: nameStack)
         avatarNameRow.translatesAutoresizingMaskIntoConstraints = false
 
+        profileActionsStack.addArrangedSubview(followButton)
+        profileActionsStack.addArrangedSubview(localBlockButton)
+
         loggedInContainer.addArrangedSubview(avatarNameRow)
         loggedInContainer.addArrangedSubview(titleLabel)
         loggedInContainer.addArrangedSubview(bioLabel)
+        loggedInContainer.addArrangedSubview(profileActionsStack)
 
         loggedInContainer.setCustomSpacing(8, after: avatarNameRow)
         loggedInContainer.setCustomSpacing(4, after: titleLabel)
-        loggedInContainer.setCustomSpacing(8, after: bioLabel)
+        loggedInContainer.setCustomSpacing(12, after: bioLabel)
+        loggedInContainer.setCustomSpacing(16, after: profileActionsStack)
 
         loggedInContainer.addArrangedSubview(statsStackView)
-        loggedInContainer.setCustomSpacing(16, after: bioLabel)
 
         loggedInContainer.addArrangedSubview(joinDateLabel)
         loggedInContainer.setCustomSpacing(12, after: statsStackView)
@@ -217,6 +262,9 @@ final class ProfileHeaderView: UIView {
 
             avatarNameRow.leadingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.leadingAnchor),
             avatarNameRow.trailingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.trailingAnchor),
+            profileActionsStack.leadingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.leadingAnchor),
+            profileActionsStack.trailingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.trailingAnchor),
+            profileActionsStack.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
             statsStackView.leadingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.leadingAnchor),
             statsStackView.trailingAnchor.constraint(equalTo: loggedInContainer.layoutMarginsGuide.trailingAnchor),
         ])
@@ -235,7 +283,12 @@ final class ProfileHeaderView: UIView {
         userProfile: DiscourseUserProfile?,
         summary: DiscourseUserSummary?,
         messageAction: MessageAction,
-        assetBaseURL: String
+        assetBaseURL: String,
+        showsFollowButton: Bool = false,
+        isFollowing: Bool = false,
+        isFollowLoading: Bool = false,
+        showsLocalBlockButton: Bool = false,
+        isLocallyBlocked: Bool = false
     ) {
         let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
         let theme = ThemeManager.shared
@@ -245,6 +298,18 @@ final class ProfileHeaderView: UIView {
         avatarImageView.backgroundColor = theme.backgroundColor
         loggedInContainer.backgroundColor = theme.cardBackgroundColor
         configureMessageButton(action: messageAction, theme: theme)
+        configureFollowButton(
+            isVisible: showsFollowButton,
+            isFollowing: isFollowing,
+            isLoading: isFollowLoading,
+            theme: theme
+        )
+        configureLocalBlockButton(
+            isVisible: showsLocalBlockButton,
+            isBlocked: isLocallyBlocked,
+            theme: theme
+        )
+        profileActionsStack.isHidden = !showsFollowButton && !showsLocalBlockButton
 
         if let user {
             loggedInContainer.isHidden = false
@@ -305,6 +370,59 @@ final class ProfileHeaderView: UIView {
         case .compose:
             messageButton.accessibilityLabel = String(localized: "user.send_message")
         }
+    }
+
+    private func configureFollowButton(
+        isVisible: Bool,
+        isFollowing: Bool,
+        isLoading: Bool,
+        theme: ThemeManager
+    ) {
+        followButton.isHidden = !isVisible
+        followButton.isEnabled = !isLoading
+
+        var config = isFollowing
+            ? UIButton.Configuration.tinted()
+            : UIButton.Configuration.filled()
+        let title = isFollowing
+            ? String(localized: "user.unfollow")
+            : String(localized: "user.follow")
+        config.title = title
+        config.image = UIImage(systemName: isFollowing ? "person.badge.minus" : "person.badge.plus")
+        config.imagePadding = 6
+        config.cornerStyle = .capsule
+        config.showsActivityIndicator = isLoading
+        if isFollowing {
+            config.baseForegroundColor = theme.accentColor
+        }
+        config.baseBackgroundColor = theme.accentColor
+        followButton.configuration = config
+        followButton.accessibilityLabel = title
+    }
+
+    private func configureLocalBlockButton(
+        isVisible: Bool,
+        isBlocked: Bool,
+        theme: ThemeManager
+    ) {
+        localBlockButton.isHidden = !isVisible
+
+        var config = isBlocked
+            ? UIButton.Configuration.filled()
+            : UIButton.Configuration.tinted()
+        let title = isBlocked
+            ? String(localized: "user.local_unblock")
+            : String(localized: "user.local_block")
+        config.title = title
+        config.image = UIImage(systemName: isBlocked ? "eye" : "eye.slash")
+        config.imagePadding = 6
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = theme.accentColor
+        if !isBlocked {
+            config.baseForegroundColor = theme.accentColor
+        }
+        localBlockButton.configuration = config
+        localBlockButton.accessibilityLabel = title
     }
 
     private func formatJoinDate(_ dateString: String) -> String {

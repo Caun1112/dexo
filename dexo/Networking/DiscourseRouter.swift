@@ -70,6 +70,7 @@ enum DiscourseRouter {
     case topicTimings
     case createPrivateMessage
     case flagPost
+    case followedUsers(username: String)
     case followUser(username: String)
     case unfollowUser(username: String)
     case messageBusPoll(clientId: String)
@@ -229,10 +230,12 @@ enum DiscourseRouter {
             return "/posts.json"
         case .flagPost:
             return "/post_actions"
+        case .followedUsers(let username):
+            return "/u/\(username)/follow/following.json"
         case .followUser(let username):
-            return "/u/\(username)/follow"
+            return "/follow/\(username).json"
         case .unfollowUser(let username):
-            return "/u/\(username)/follow"
+            return "/follow/\(username).json"
         case .messageBusPoll(let clientId):
             return "/message-bus/\(clientId)/poll"
         case .subscribePush:

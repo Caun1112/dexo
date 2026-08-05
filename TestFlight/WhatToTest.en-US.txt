@@ -1,8 +1,6 @@
 What to Test
 
-- Enable DoH, then open the web login for linux.do and another forum. Confirm both in-app web pages load normally through the selected resolver.
-- Set a category or tag to Watching First Post, then create a topic in it. Confirm this watched-category/tag notification reads “@username created a topic”, the line below contains only the topic title (not the first post excerpt), and tapping it opens the new topic.
-- Test with the updated push relay deployed. Upgrade from an earlier build with push enabled, trigger a reply or mention, and confirm valid notifications still decrypt and open the correct forum and post.
-- With push enabled, go offline and sign out, then restore the network and trigger notifications for the old account. A generic encrypted fallback may appear once; confirm later pushes from that obsolete subscription stop after the relay retires it.
-- Sign in to a different account on the same forum. Confirm the previous account's subscription is retired without using the new account's authorization, and enabling push creates a fresh subscription for the current account.
-- Revoke the forum session or User API Key, then trigger a protected request and a push. Confirm the app signs out, the unusable subscription is reported to the relay, and subsequent pushes for it stop.
+- On linux.do, follow or unfollow a user from their profile, then verify the Settings following list refreshes and supports swipe-to-unfollow.
+- Add a user to the local blocklist. Confirm their posts are hidden, can be restored inline, and the Settings list enforces the 50-user limit.
+- Open web login and use Debug to confirm request and page errors appear without affecting sign-in.
+- Reopen topics with Boost danmaku and confirm delayed comments from a previous topic never appear in the next one.

@@ -2,6 +2,46 @@ import XCTest
 @testable import dexo
 
 final class DiscourseRouterTests: XCTestCase {
+    func testLinuxDoFollowRoutesUsePluginEndpointAndMethods() {
+        let list = DiscourseRouter.followedUsers(username: "current-user")
+        XCTAssertEqual(list.path, "/u/current-user/follow/following.json")
+        XCTAssertEqual(list.method, .get)
+
+        let follow = DiscourseRouter.followUser(username: "undefinedmoe")
+        XCTAssertEqual(follow.path, "/follow/undefinedmoe.json")
+        XCTAssertEqual(follow.method, .put)
+
+        let unfollow = DiscourseRouter.unfollowUser(username: "undefinedmoe")
+        XCTAssertEqual(unfollow.path, "/follow/undefinedmoe.json")
+        XCTAssertEqual(unfollow.method, .delete)
+    }
+
+    func testUserProfileDecodesFollowPluginState() throws {
+        let data = Data(
+            #"{"user":{"id":42,"username":"undefinedmoe","can_follow":true,"is_followed":false}}"#.utf8
+        )
+        let response = try JSONDecoder().decode(DiscourseUserProfileResponse.self, from: data)
+
+        XCTAssertEqual(response.user.canFollow, true)
+        XCTAssertEqual(response.user.isFollowed, false)
+    }
+
+    func testFollowedUsersDecodeBasicUserArray() throws {
+        let data = Data(
+            #"[{"id":42,"username":"undefinedmoe","name":"Undefined Moe","avatar_template":"/avatar/{size}.png"}]"#.utf8
+        )
+        let users = try JSONDecoder().decode([DiscourseFollowedUser].self, from: data)
+
+        XCTAssertEqual(users, [
+            DiscourseFollowedUser(
+                id: 42,
+                username: "undefinedmoe",
+                name: "Undefined Moe",
+                avatarTemplate: "/avatar/{size}.png"
+            ),
+        ])
+    }
+
     func testTopicFeedRoutesMapAllModesToServerEndpoints() {
         XCTAssertEqual(
             DiscourseRouter.topicFeed(mode: .activity, page: 0).path,

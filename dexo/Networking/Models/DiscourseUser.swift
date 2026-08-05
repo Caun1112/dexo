@@ -26,6 +26,18 @@ struct DiscourseCurrentUser: Decodable {
     }
 }
 
+struct DiscourseFollowedUser: Decodable, Equatable, Identifiable {
+    let id: Int
+    let username: String
+    let name: String?
+    let avatarTemplate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, username, name
+        case avatarTemplate = "avatar_template"
+    }
+}
+
 struct DiscourseUserProfileResponse: Decodable {
     let user: DiscourseUserProfile
 }
@@ -45,6 +57,8 @@ struct DiscourseUserProfile: Codable {
     let flairName: String?
     let flairUrl: String?
     let canSendPrivateMessageToUser: Bool?
+    let canFollow: Bool?
+    let isFollowed: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, username, name, title
@@ -58,5 +72,7 @@ struct DiscourseUserProfile: Codable {
         case flairName = "flair_name"
         case flairUrl = "flair_url"
         case canSendPrivateMessageToUser = "can_send_private_message_to_user"
+        case canFollow = "can_follow"
+        case isFollowed = "is_followed"
     }
 }

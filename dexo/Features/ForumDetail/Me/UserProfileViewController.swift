@@ -62,6 +62,12 @@ final class UserProfileViewController: ObservableViewController {
         profileHeader.onMessageTapped = { [weak self] in
             self?.handleMessageTapped()
         }
+        profileHeader.onFollowTapped = { [weak self] in
+            self?.handleFollowTapped()
+        }
+        profileHeader.onLocalBlockTapped = { [weak self] in
+            self?.handleLocalBlockTapped()
+        }
 
         Task {
             await viewModel.load()
@@ -118,7 +124,12 @@ final class UserProfileViewController: ObservableViewController {
                 userProfile: profile,
                 summary: viewModel.summary,
                 messageAction: viewModel.isOwnProfile ? .inbox : .compose,
-                assetBaseURL: api.assetBaseURL
+                assetBaseURL: api.assetBaseURL,
+                showsFollowButton: viewModel.showsFollowButton,
+                isFollowing: viewModel.isFollowing,
+                isFollowLoading: viewModel.isUpdatingFollow,
+                showsLocalBlockButton: viewModel.showsLocalBlockButton,
+                isLocallyBlocked: viewModel.isLocallyBlocked
             )
         }
 
@@ -145,6 +156,33 @@ final class UserProfileViewController: ObservableViewController {
     }
 
     // MARK: - Actions
+
+    private func handleFollowTapped() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await viewModel.toggleFollow()
+            } catch {
+                guard !Task.isCancelled else { return }
+                let alert = UIAlertController(title: nil, message: error.localizedDescription, preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+                present(alert, animated: true)
+            }
+        }
+    }
+
+    private func handleLocalBlockTapped() {
+        guard viewModel.toggleLocalBlock() == .limitReached else { return }
+        let alert = UIAlertController(
+            title: nil,
+            message: String(
+                localized: "user.local_blocklist.limit_reached \(AppSettings.maximumLocalBlockedUsers)"
+            ),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+        present(alert, animated: true)
+    }
 
     private func presentMessageComposer() {
         let composer = MessageComposerViewController(

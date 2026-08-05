@@ -18,6 +18,7 @@ nonisolated enum VirtualTopicItem: Hashable, Sendable {
     case footer(Int)
     case boosts(Int)
     case collapsed(Int)
+    case blocked(Int)
     case loadMoreChildren(Int)
     case paginationStatus
 
@@ -27,9 +28,14 @@ nonisolated enum VirtualTopicItem: Hashable, Sendable {
             return postId
         case .unit(let id):
             return id.postId
-        case .title, .acceptedAnswer, .loadMoreChildren, .paginationStatus:
+        case .title, .acceptedAnswer, .blocked, .loadMoreChildren, .paginationStatus:
             return nil
         }
+    }
+
+    var postAnchorId: Int? {
+        if case .blocked(let postId) = self { return postId }
+        return longPressPostId
     }
 }
 
@@ -46,7 +52,7 @@ nonisolated enum VirtualTopicObservedSnapshotPolicy {
 
 nonisolated enum VirtualTopicPrependAnchorSelector {
     static func firstPostItem(in items: [VirtualTopicItem]) -> VirtualTopicItem? {
-        items.first { $0.longPressPostId != nil }
+        items.first { $0.postAnchorId != nil }
     }
 }
 
@@ -123,6 +129,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         view.register(VirtualPostFooterCell.self, forCellWithReuseIdentifier: VirtualPostFooterCell.reuseIdentifier)
         view.register(VirtualTopicMessageCell.self, forCellWithReuseIdentifier: VirtualTopicMessageCell.reuseIdentifier)
         view.register(VirtualPostCollapsedCell.self, forCellWithReuseIdentifier: VirtualPostCollapsedCell.reuseIdentifier)
+        view.register(VirtualBlockedPostCell.self, forCellWithReuseIdentifier: VirtualBlockedPostCell.reuseIdentifier)
         view.register(VirtualLoadMoreChildrenCell.self, forCellWithReuseIdentifier: VirtualLoadMoreChildrenCell.reuseIdentifier)
         view.register(VirtualBoostsCell.self, forCellWithReuseIdentifier: VirtualBoostsCell.reuseIdentifier)
         return view
@@ -301,6 +308,20 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
                 baseURL: self.baseURL
             )
             cell.onExpand = { [weak self] in self?.postCell(didToggleCollapseForPostId: $0) }
+            return cell
+
+        case .blocked(let postId):
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: VirtualBlockedPostCell.reuseIdentifier, for: indexPath) as! VirtualBlockedPostCell
+            guard let post = self.viewModel.postsById[postId] else { return cell }
+            cell.configure(
+                username: post.username,
+                depth: self.viewModel.isTreeMode ? (self.viewModel.postDepths[postId] ?? 0) : 0,
+                treeState: self.viewModel.isTreeMode ? self.viewModel.postTreeLineStates[postId] : nil
+            )
+            cell.onUnblock = { [weak self] in
+                guard let self else { return }
+                AppSettings.shared.unblockUserLocally(username: post.username, baseURL: self.baseURL)
+            }
             return cell
 
         case .loadMoreChildren(let parentId):
@@ -560,6 +581,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
     }
 
     override func updateUI() {
+        _ = AppSettings.shared.localBlocklistRevision
         if viewModel.isLoading || isReloadingTreeMode {
             activityIndicator.startAnimating()
         } else {
@@ -703,7 +725,9 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
             var boostHeights: [Int: CGFloat] = [:]
             var solutionHeights: [Int: CGFloat] = [:]
 
-            for post in viewModel.visiblePosts {
+            let blockedUsernames = AppSettings.shared.localBlockedUsernames(for: baseURL)
+            for post in viewModel.visiblePosts
+            where !blockedUsernames.contains(post.username.lowercased()) {
                 guard let document = viewModel.renderDocuments[post.id] else { continue }
                 let depth = viewModel.isTreeMode ? (viewModel.postDepths[post.id] ?? 0) : 0
                 let indent = PostNativeCell.treeContentIndent(forDepth: depth)
@@ -751,7 +775,8 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
                 contentWidth: solutionContentWidth,
                 baseURL: baseURL
             )
-            for answer in viewModel.topic?.acceptedAnswers ?? [] {
+            for answer in viewModel.topic?.acceptedAnswers ?? []
+            where !blockedUsernames.contains(answer.username.lowercased()) {
                 guard let document = solutionDocument(for: answer) else { continue }
                 solutionHeights[answer.postNumber] =
                     VirtualAcceptedAnswersCell.measuredBodyHeight(
@@ -947,12 +972,17 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         if let topic = viewModel.topic { items.append(.title(topic.id)) }
 
         let visible = viewModel.visiblePosts
+        let blockedUsernames = AppSettings.shared.localBlockedUsernames(for: baseURL)
         var loadsByAnchor: [Int: [PendingChildLoad]] = [:]
         for load in viewModel.pendingChildLoads.values {
             loadsByAnchor[load.anchorPostId, default: []].append(load)
         }
         for post in visible where viewModel.renderDocuments[post.id] != nil {
-            if viewModel.isTreeMode, viewModel.collapsedPostIds.contains(post.id) {
+            if blockedUsernames.contains(post.username.lowercased()) {
+                let item = VirtualTopicItem.blocked(post.id)
+                items.append(item)
+                postIdByItem[item] = post.id
+            } else if viewModel.isTreeMode, viewModel.collapsedPostIds.contains(post.id) {
                 let item = VirtualTopicItem.collapsed(post.id)
                 items.append(item)
                 postIdByItem[item] = post.id
@@ -968,7 +998,8 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
                 }
                 if post.postNumber == 1, let topic = viewModel.topic {
                     for answer in topic.acceptedAnswers
-                    where solutionDocument(for: answer) != nil {
+                    where !blockedUsernames.contains(answer.username.lowercased())
+                        && solutionDocument(for: answer) != nil {
                         items.append(.acceptedAnswer(answer.postNumber))
                     }
                 }
@@ -1179,6 +1210,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         guard let post = viewModel.posts.first(where: { $0.postNumber == floor }),
               let indexPath = dataSource.indexPath(for: .header(post.id))
                 ?? dataSource.indexPath(for: .collapsed(post.id))
+                ?? dataSource.indexPath(for: .blocked(post.id))
         else { return }
         collectionView.scrollToItem(at: indexPath, at: position, animated: false)
     }
@@ -1435,6 +1467,7 @@ extension VirtualizedTopicDetailViewController: TopicTimelineLayoutDelegate {
             )
         case .footer: return 50
         case .collapsed: return PostCollapsedCell.cellHeight
+        case .blocked: return VirtualBlockedPostCell.cellHeight
         case .loadMoreChildren: return LoadMoreChildrenCell.cellHeight
         case .paginationStatus: return 44
         case .boosts(let postId): return resolvedBoostHeights[postId] ?? 44

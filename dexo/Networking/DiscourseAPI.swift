@@ -578,10 +578,17 @@ final class DiscourseAPI {
     }
 
     func followUser(username: String) async throws {
+        guard isLinuxDo else { throw URLError(.unsupportedURL) }
         let _: [String: String] = try await request(route: .followUser(username: username))
     }
 
+    func fetchFollowedUsers(username: String) async throws -> [DiscourseFollowedUser] {
+        guard isLinuxDo else { throw URLError(.unsupportedURL) }
+        return try await request(route: .followedUsers(username: username))
+    }
+
     func unfollowUser(username: String) async throws {
+        guard isLinuxDo else { throw URLError(.unsupportedURL) }
         let _: [String: String] = try await request(route: .unfollowUser(username: username))
     }
 

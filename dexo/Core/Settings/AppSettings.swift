@@ -84,6 +84,124 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "hasShownAutoOpenPrompt") }
     }
 
+    // MARK: - Local User Blocklist
+
+    static let maximumLocalBlockedUsers = 50
+
+    struct LocalBlockedUser: Codable, Equatable, Identifiable {
+        let forumBaseURL: String
+        let username: String
+
+        var id: String {
+            "\(forumBaseURL)|\(username.lowercased())"
+        }
+    }
+
+    enum LocalBlockResult: Equatable {
+        case added
+        case alreadyBlocked
+        case limitReached
+    }
+
+    /// Observable in-memory generation for screens that need to rebuild their
+    /// local content snapshots when the persisted blocklist changes.
+    private(set) var localBlocklistRevision = 0
+
+    private(set) var localBlockedUsers: [LocalBlockedUser] {
+        get {
+            guard let data = defaults.data(forKey: "localBlockedUsers"),
+                  let users = try? JSONDecoder().decode([LocalBlockedUser].self, from: data)
+            else { return [] }
+            return Self.sanitizedLocalBlockedUsers(users)
+        }
+        set {
+            let users = Self.sanitizedLocalBlockedUsers(newValue)
+            if let data = try? JSONEncoder().encode(users) {
+                defaults.set(data, forKey: "localBlockedUsers")
+            }
+        }
+    }
+
+    func localBlockedUsers(for baseURL: String) -> [LocalBlockedUser] {
+        let forum = Self.normalizedForumBaseURL(baseURL)
+        return localBlockedUsers.filter { $0.forumBaseURL == forum }
+    }
+
+    func localBlockedUsernames(for baseURL: String) -> Set<String> {
+        Set(localBlockedUsers(for: baseURL).map { $0.username.lowercased() })
+    }
+
+    func isUserLocallyBlocked(username: String, baseURL: String) -> Bool {
+        localBlockedUsernames(for: baseURL).contains(username.lowercased())
+    }
+
+    @discardableResult
+    func blockUserLocally(username: String, baseURL: String) -> LocalBlockResult {
+        let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUsername.isEmpty else { return .alreadyBlocked }
+
+        let forum = Self.normalizedForumBaseURL(baseURL)
+        var users = localBlockedUsers
+        if users.contains(where: {
+            $0.forumBaseURL == forum
+                && $0.username.caseInsensitiveCompare(trimmedUsername) == .orderedSame
+        }) {
+            return .alreadyBlocked
+        }
+        guard users.count < Self.maximumLocalBlockedUsers else { return .limitReached }
+
+        users.append(LocalBlockedUser(forumBaseURL: forum, username: trimmedUsername))
+        localBlockedUsers = users
+        localBlocklistRevision &+= 1
+        return .added
+    }
+
+    @discardableResult
+    func unblockUserLocally(username: String, baseURL: String) -> Bool {
+        let forum = Self.normalizedForumBaseURL(baseURL)
+        var users = localBlockedUsers
+        let originalCount = users.count
+        users.removeAll {
+            $0.forumBaseURL == forum
+                && $0.username.caseInsensitiveCompare(username) == .orderedSame
+        }
+        guard users.count != originalCount else { return false }
+
+        localBlockedUsers = users
+        localBlocklistRevision &+= 1
+        return true
+    }
+
+    private static func normalizedForumBaseURL(_ baseURL: String) -> String {
+        guard let url = URL(string: baseURL),
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased()
+        else {
+            return baseURL
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                .lowercased()
+        }
+        let port = url.port.map { ":\($0)" } ?? ""
+        return "\(scheme)://\(host)\(port)"
+    }
+
+    private static func sanitizedLocalBlockedUsers(
+        _ users: [LocalBlockedUser]
+    ) -> [LocalBlockedUser] {
+        var result: [LocalBlockedUser] = []
+        var seen: Set<String> = []
+        for user in users {
+            let username = user.username.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !username.isEmpty else { continue }
+            let forum = normalizedForumBaseURL(user.forumBaseURL)
+            let entry = LocalBlockedUser(forumBaseURL: forum, username: username)
+            guard seen.insert(entry.id).inserted else { continue }
+            result.append(entry)
+            if result.count == maximumLocalBlockedUsers { break }
+        }
+        return result
+    }
+
     // MARK: - Theme
 
     var selectedThemeId: String {

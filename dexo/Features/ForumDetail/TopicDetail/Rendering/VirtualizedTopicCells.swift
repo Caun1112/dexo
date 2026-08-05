@@ -1833,6 +1833,93 @@ final class VirtualPostCollapsedCell: UICollectionViewCell {
     @objc private func expandTapped() { onExpand?(postId) }
 }
 
+final class VirtualBlockedPostCell: UICollectionViewCell {
+    static let reuseIdentifier = "VirtualBlockedPostCell"
+    static let cellHeight: CGFloat = 64
+
+    private let treeLineView = TreeLineView()
+    private let hiddenIcon = UIImageView(image: UIImage(systemName: "eye.slash"))
+    private let summaryLabel = UILabel()
+    private let unblockButton = UIButton(type: .system)
+    private var iconLeadingConstraint: NSLayoutConstraint!
+    var onUnblock: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        treeLineView.translatesAutoresizingMaskIntoConstraints = false
+
+        hiddenIcon.translatesAutoresizingMaskIntoConstraints = false
+        hiddenIcon.contentMode = .scaleAspectFit
+        hiddenIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        summaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        summaryLabel.font = FontManager.shared.font(size: 13, weight: .medium)
+        summaryLabel.textColor = .secondaryLabel
+        summaryLabel.lineBreakMode = .byTruncatingTail
+
+        unblockButton.translatesAutoresizingMaskIntoConstraints = false
+        unblockButton.setTitle(String(localized: "user.local_unblock"), for: .normal)
+        unblockButton.titleLabel?.font = FontManager.shared.font(size: 13, weight: .medium)
+        unblockButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        unblockButton.addTarget(self, action: #selector(unblockTapped), for: .touchUpInside)
+
+        contentView.addSubview(treeLineView)
+        contentView.addSubview(hiddenIcon)
+        contentView.addSubview(summaryLabel)
+        contentView.addSubview(unblockButton)
+        iconLeadingConstraint = hiddenIcon.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
+
+        NSLayoutConstraint.activate([
+            treeLineView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            treeLineView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            treeLineView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            treeLineView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            iconLeadingConstraint,
+            hiddenIcon.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            hiddenIcon.widthAnchor.constraint(equalToConstant: 24),
+            hiddenIcon.heightAnchor.constraint(equalToConstant: 24),
+            summaryLabel.leadingAnchor.constraint(equalTo: hiddenIcon.trailingAnchor, constant: 8),
+            summaryLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            unblockButton.leadingAnchor.constraint(greaterThanOrEqualTo: summaryLabel.trailingAnchor, constant: 8),
+            unblockButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            unblockButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    func configure(username: String, depth: Int, treeState: TreeLineState?) {
+        let theme = ThemeManager.shared
+        backgroundColor = theme.cardBackgroundColor
+        contentView.backgroundColor = theme.cardBackgroundColor
+        hiddenIcon.tintColor = theme.accentColor
+        unblockButton.tintColor = theme.accentColor
+        iconLeadingConstraint.constant = 12 + PostNativeCell.treeAvatarIndent(forDepth: depth)
+        summaryLabel.text = String(localized: "topic_detail.local_blocked_post \(username)")
+        accessibilityLabel = summaryLabel.text
+
+        if let treeState, treeState.depth >= 2 {
+            treeLineView.isHidden = false
+            treeLineView.state = treeState
+            treeLineView.connectorY = Self.cellHeight / 2
+            treeLineView.avatarBottomY = (Self.cellHeight + 24) / 2
+            treeLineView.lineColor = theme.quoteBarColor
+        } else {
+            treeLineView.isHidden = true
+            treeLineView.state = nil
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onUnblock = nil
+        summaryLabel.text = nil
+        treeLineView.state = nil
+    }
+
+    @objc private func unblockTapped() { onUnblock?() }
+}
+
 final class VirtualLoadMoreChildrenCell: UICollectionViewCell {
     static let reuseIdentifier = "VirtualLoadMoreChildrenCell"
 

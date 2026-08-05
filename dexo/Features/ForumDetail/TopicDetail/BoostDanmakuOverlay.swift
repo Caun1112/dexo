@@ -156,7 +156,7 @@ final class BoostDanmakuOverlay {
 
         // Clear any running danmaku first
         stop()
-        cleanupToken += 1
+        let token = cleanupToken
 
         let frame = CGRect(x: 0, y: top, width: hostView.bounds.width, height: bottom - top)
 
@@ -177,11 +177,11 @@ final class BoostDanmakuOverlay {
 
             let delay = Double(i) * 0.4
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.danmakuView?.shoot(danmaku: model)
+                guard let self, self.cleanupToken == token else { return }
+                self.danmakuView?.shoot(danmaku: model)
             }
         }
 
-        let token = cleanupToken
         let totalDuration = Double(boosts.count) * 0.4 + 7
         DispatchQueue.main.asyncAfter(deadline: .now() + totalDuration) { [weak self] in
             guard let self, self.cleanupToken == token else { return }
@@ -190,6 +190,9 @@ final class BoostDanmakuOverlay {
     }
 
     func stop() {
+        // Invalidate delayed shots from the previous run before replacing or
+        // removing its view. Otherwise they would be delivered to a later run.
+        cleanupToken += 1
         danmakuView?.stop()
         danmakuView?.removeFromSuperview()
         danmakuView = nil

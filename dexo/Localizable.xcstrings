@@ -3491,6 +3491,7 @@
       }
     },
     "push.logout_cleanup.message %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3502,6 +3503,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dexo 无法移除论坛推送订阅。为防止退出后仍收到通知，本次未退出登录。%@"
+          }
+        }
+      }
+    },
+    "push.logout_cleanup.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could Not Sign Out"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法退出登录"
           }
         }
       }
@@ -3550,22 +3568,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此通知所属的论坛已不可用。"
-          }
-        }
-      }
-    },
-    "push.logout_cleanup.title" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Could Not Sign Out"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法退出登录"
           }
         }
       }
@@ -4224,6 +4226,150 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "展开"
+          }
+        }
+      }
+    },
+    "settings.local_blocklist" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local Blocklist"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地黑名单"
+          }
+        }
+      }
+    },
+    "settings.local_blocklist.count %lld %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld/%2$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld/%2$lld"
+          }
+        }
+      }
+    },
+    "settings.local_blocklist.empty" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No locally blocked users"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无本地黑名单用户"
+          }
+        }
+      }
+    },
+    "settings.local_blocklist.footer %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stored only on this device. Up to %lld users can be blocked across all forums."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "黑名单仅保存在本机，所有论坛合计最多可添加 %lld 个用户。"
+          }
+        }
+      }
+    },
+    "settings.following" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Following"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关注列表"
+          }
+        }
+      }
+    },
+    "settings.following.empty" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You aren't following anyone yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂未关注任何用户"
+          }
+        }
+      }
+    },
+    "settings.following.forum_required" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add linux.do before viewing your following list."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先添加 linux.do 论坛，再查看关注列表。"
+          }
+        }
+      }
+    },
+    "settings.following.linux_do_only" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "linux.do only"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅支持 linux.do"
+          }
+        }
+      }
+    },
+    "settings.following.login_required" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in to linux.do before viewing your following list."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先登录 linux.do，再查看关注列表。"
           }
         }
       }
@@ -6742,6 +6888,22 @@
         }
       }
     },
+    "topic_detail.local_blocked_post %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post from @%@ hidden locally"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在本地隐藏 @%@ 的帖子"
+          }
+        }
+      }
+    },
     "topic_detail.default_title" : {
       "localizations" : {
         "en" : {
@@ -7178,7 +7340,6 @@
       }
     },
     "user.follow" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7190,6 +7351,70 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关注"
+          }
+        }
+      }
+    },
+    "user.local_block" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入黑名单"
+          }
+        }
+      }
+    },
+    "user.local_blocklist.limit_reached %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The local blocklist can contain up to %lld users."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地黑名单最多只能添加 %lld 个用户。"
+          }
+        }
+      }
+    },
+    "user.local_unblock" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unblock"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移出黑名单"
+          }
+        }
+      }
+    },
+    "user.unfollow" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unfollow"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消关注"
           }
         }
       }
@@ -7339,6 +7564,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "主题"
+          }
+        }
+      }
+    },
+    "weblogin.debug" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debug"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调试"
+          }
+        }
+      }
+    },
+    "weblogin.debug.close" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide Debug"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏调试"
+          }
+        }
+      }
+    },
+    "weblogin.debug.empty" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reproduce the login problem. JavaScript errors and failed requests will appear here; press and hold to copy."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请重新触发登录问题。JavaScript 错误和失败请求会显示在这里，长按可复制。"
+          }
+        }
+      }
+    },
+    "weblogin.debug.enabled" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics enabled. The login page will reload; reproduce the problem once. Sensitive fields are redacted."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "诊断已开启，登录页面将重新加载；请重新触发一次问题。敏感字段会自动打码。"
+          }
+        }
+      }
+    },
+    "weblogin.debug.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Login diagnostics"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录诊断"
           }
         }
       }
