@@ -305,7 +305,7 @@ extension MeViewController: UITableViewDataSource {
     }
 
     private var accountRows: [AccountRow] {
-        guard authGate?.isAuthenticated() == true else { return [.localBlocklist] }
+        guard authGate?.isAuthenticated() == true else { return [] }
         var rows: [AccountRow] = [.notifications, .bookmarks, .read]
         if api.isLinuxDo {
             rows.append(.following)
