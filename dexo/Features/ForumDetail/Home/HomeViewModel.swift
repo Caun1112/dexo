@@ -47,6 +47,14 @@ final class HomeViewModel {
         return usersById[firstPoster.userId]?.avatarTemplate
     }
 
+    func visibleTopics(excluding blockedUsernames: Set<String>) -> [DiscourseTopicList.Topic] {
+        TopicListFilter.excludingBlockedAuthors(
+            from: topics,
+            usersById: usersById,
+            blockedUsernames: blockedUsernames
+        )
+    }
+
     func category(for topic: DiscourseTopicList.Topic) -> DiscourseCategory? {
         guard let catId = topic.categoryId else { return nil }
         return categoriesById[catId]

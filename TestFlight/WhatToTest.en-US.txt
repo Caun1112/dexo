@@ -1,6 +1,6 @@
 What to Test
 
 - On linux.do, follow or unfollow a user from their profile, then verify the forum profile center's following list refreshes and supports swipe-to-unfollow.
-- Add a user to the local blocklist. Confirm their posts are hidden, can be restored inline, and the forum profile center shows only that forum's blocked users.
+- Add a user to the local blocklist. Confirm their topics and posts are hidden, and the forum profile center shows only that forum's blocked users.
 - Open web login and use Debug to confirm request and page errors appear without affecting sign-in.
 - Reopen topics with Boost danmaku and confirm delayed comments from a previous topic never appear in the next one.

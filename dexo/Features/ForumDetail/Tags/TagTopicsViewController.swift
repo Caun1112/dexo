@@ -25,6 +25,14 @@ private final class TagTopicsViewModel {
         return usersById[firstPoster.userId]?.avatarTemplate
     }
 
+    func visibleTopics(excluding blockedUsernames: Set<String>) -> [DiscourseTopicList.Topic] {
+        TopicListFilter.excludingBlockedAuthors(
+            from: topics,
+            usersById: usersById,
+            blockedUsernames: blockedUsernames
+        )
+    }
+
     func category(for topic: DiscourseTopicList.Topic) -> DiscourseCategory? {
         guard let catId = topic.categoryId else { return nil }
         return categoriesById[catId]
@@ -204,10 +212,14 @@ final class TagTopicsViewController: ObservableViewController {
     }
 
     override func updateUI() {
+        _ = AppSettings.shared.localBlocklistRevision
+        let topics = viewModel.visibleTopics(
+            excluding: AppSettings.shared.localBlockedUsernames(for: api.baseURL)
+        )
         var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
         snapshot.appendSections([0])
         var seen = Set<Int>()
-        let uniqueIds = viewModel.topics.compactMap { topic -> Int? in
+        let uniqueIds = topics.compactMap { topic -> Int? in
             guard seen.insert(topic.id).inserted else { return nil }
             return topic.id
         }

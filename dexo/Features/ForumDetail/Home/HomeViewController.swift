@@ -279,6 +279,7 @@ final class HomeViewController: ObservableViewController {
     }
 
     override func updateUI() {
+        _ = AppSettings.shared.localBlocklistRevision
         // Login-required state
         if viewModel.requiresLogin {
             errorLabel.text = viewModel.errorMessage
@@ -307,10 +308,13 @@ final class HomeViewController: ObservableViewController {
 
         var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
         snapshot.appendSections([0])
+        let topics = viewModel.visibleTopics(
+            excluding: AppSettings.shared.localBlockedUsernames(for: api.baseURL)
+        )
         var seen = Set<Int>()
         var pinnedItems: [PinnedTopicBar.Item] = []
         var regularIds: [Int] = []
-        for topic in viewModel.topics {
+        for topic in topics {
             guard seen.insert(topic.id).inserted else { continue }
             if topic.pinned == true {
                 let color = viewModel.category(for: topic).flatMap { Self.color(fromHex: $0.color) }
