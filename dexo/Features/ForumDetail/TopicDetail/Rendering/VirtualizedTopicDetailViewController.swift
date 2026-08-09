@@ -106,6 +106,9 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
     private lazy var boostDanmaku = BoostDanmakuOverlay(hostView: view)
     private let floatingReplyButton = FloatingReplyButton()
     private var floatingReplyButtonPositioned = false
+
+    /// Right-edge back button for one-handed use. Phone-only.
+    private let floatingBackButton = FloatingBackButton()
     private var treeReloadGeneration: UInt = 0
     private var isReloadingTreeMode = false
     private var isPerformingJump = false
@@ -382,6 +385,21 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         return label
     }()
 
+    /// Compact "42%" readout shown in the nav bar while a ReadBoost run for
+    /// this topic is in flight.
+    private let readBoostPercentLabel: UILabel = {
+        let label = UILabel()
+        label.font = FontManager.shared.font(size: 14, weight: .semibold)
+        label.textColor = ThemeManager.shared.accentColor
+        return label
+    }()
+
+    /// Whether the percentage item is currently in `rightBarButtonItems`.
+    private var readBoostPercentVisible = false
+
+    /// Guards the once-per-screen ReadBoost auto-run.
+    private var readBoostAutoStartTriggered = false
+
     private let errorLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -439,6 +457,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
     private lazy var bottomBar: TopicDetailBottomBar = {
         let bar = TopicDetailBottomBar()
         bar.delegate = self
+        bar.showsReadBoost = true
         return bar
     }()
 
@@ -474,6 +493,8 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         view.addSubview(bottomBar)
         view.addSubview(floatingReplyButton)
         floatingReplyButton.addTarget(self, action: #selector(floatingReplyTapped), for: .touchUpInside)
+        view.addSubview(floatingBackButton)
+        floatingBackButton.addTarget(self, action: #selector(floatingBackTapped), for: .touchUpInside)
         NSLayoutConstraint.activate([
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -536,6 +557,12 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
                 floatingReplyButtonPositioned = true
             }
         }
+        // Only phones get the side back button — an iPad's nav bar is already
+        // within reach, and the pill would just sit on top of the content.
+        floatingBackButton.isHidden = traitCollection.horizontalSizeClass == .regular
+        if !floatingBackButton.isHidden, view.bounds.width > 0 {
+            floatingBackButton.updatePosition()
+        }
     }
 
     override func didReceiveMemoryWarning() {
@@ -578,6 +605,22 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         applySnapshot(reloadVisible: false)
         if let floor = initialFloor { scrollToFloor(floor, position: .top) }
         initialFloor = nil
+        maybeAutoStartReadBoost()
+    }
+
+    /// Kick off a ReadBoost sweep for this topic when the user opted into
+    /// auto-run. Once per screen, and never on top of a run already in flight.
+    private func maybeAutoStartReadBoost() {
+        guard !readBoostAutoStartTriggered else { return }
+        let manager = ReadBoostManager.shared
+        guard manager.config.autoStart, manager.config.hasAgreed, !manager.isRunning else { return }
+        readBoostAutoStartTriggered = true
+        manager.start(
+            api: api,
+            topicId: topicId,
+            currentPosition: currentVisibleFloor(),
+            totalReplies: readBoostTotalReplies()
+        )
     }
 
     override func updateUI() {
@@ -604,7 +647,39 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         errorLabel.isHidden = viewModel.errorMessage == nil
         topLoadingBar.alpha = viewModel.isLoadingEarlier ? 1 : 0
         bottomBar.setOPOnlySelected(viewModel.isFilteringByOP)
+        updateReadBoostControls()
         handleLoadErrorIfNeeded()
+    }
+
+    /// Mirror the shared ReadBoost run into the bottom-bar pill and the
+    /// nav-bar percentage readout. Both are driven from `updateUI` so the
+    /// perception-tracking loop refreshes them as the sweep advances.
+    private func updateReadBoostControls() {
+        let manager = ReadBoostManager.shared
+        bottomBar.setReadBoostRunning(manager.isRunning)
+
+        let percent = manager.progressPercent
+        let showsPercent = manager.isRunning && manager.topicId == topicId && percent != nil
+        if showsPercent {
+            readBoostPercentLabel.text = "\(percent ?? 0)%"
+            readBoostPercentLabel.sizeToFit()
+        }
+        // Rebuilding the bar items on every observation cycle would drop the
+        // tree-mode button's menu mid-interaction — only swap when the readout
+        // actually appears or leaves.
+        guard showsPercent != readBoostPercentVisible else { return }
+        readBoostPercentVisible = showsPercent
+        refreshRightBarButtonItems()
+    }
+
+    /// Single owner of `rightBarButtonItems` — the tree-mode control plus the
+    /// optional ReadBoost percentage.
+    private func refreshRightBarButtonItems() {
+        var items = [treeModeBarButtonItem()]
+        if readBoostPercentVisible {
+            items.append(UIBarButtonItem(customView: readBoostPercentLabel))
+        }
+        navigationItem.rightBarButtonItems = items
     }
 
     @objc private func appDidEnterBackground() {
@@ -1353,7 +1428,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
     }
 
     private func updateTreeModeControls() {
-        navigationItem.rightBarButtonItem = treeModeBarButtonItem()
+        refreshRightBarButtonItems()
         let isTreeMode = viewModel.isTreeMode
         bottomBar.hidesFloorControls = isTreeMode
         bottomBar.isHidden = isTreeMode
@@ -1368,7 +1443,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         guard viewModel.isTreeMode, viewModel.treeSort != sort else { return }
         viewModel.treeSort = sort
         AppSettings.shared.topicTreeSort = sort
-        navigationItem.rightBarButtonItem = treeModeBarButtonItem()
+        refreshRightBarButtonItems()
         let generation = nextTreeReloadGeneration()
         contentOperationGeneration &+= 1
         let anchor = captureAnchor()
@@ -1378,7 +1453,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
             resolvedHeights.removeAll()
             resolvedBoostHeights.removeAll()
             applySnapshot(reloadVisible: true, preserving: anchor)
-            navigationItem.rightBarButtonItem = treeModeBarButtonItem()
+            refreshRightBarButtonItems()
         }
     }
 
@@ -1407,6 +1482,10 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
 
     @objc private func floatingReplyTapped() {
         requireAuthentication { [weak self] in self?.presentReplyComposer(for: nil) }
+    }
+
+    @objc private func floatingBackTapped() {
+        navigationController?.popViewController(animated: true)
     }
 
     private func requireAuthentication(_ action: @escaping () -> Void) {
@@ -1441,6 +1520,9 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
             ) { [weak self] _ in
                 self?.postCell(didToggleBookmarkForPost: post, isBookmarked: !post.bookmarked)
             },
+            UIAction(title: String(localized: "share_image.action.title"), image: UIImage(systemName: "photo")) { [weak self] _ in
+                self?.presentShareImage(for: post)
+            },
         ]
         if post.canFlag {
             actions.append(UIAction(title: String(localized: "post.flag"), image: UIImage(systemName: "flag"), attributes: .destructive) { [weak self, weak sourceView] _ in
@@ -1449,6 +1531,19 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
             })
         }
         return UIMenu(children: actions)
+    }
+
+    /// Open the share-as-image preview for one post. Reuses the already-parsed
+    /// render document so the card body matches what the topic screen shows.
+    private func presentShareImage(for post: DiscourseTopicDetail.Post) {
+        let preview = ShareImagePreviewViewController(
+            post: post,
+            topicTitle: viewModel.topic?.title ?? "",
+            topicId: topicId,
+            baseURL: baseURL,
+            annotatedBlocks: viewModel.renderDocuments[post.id]?.annotatedBlocks ?? []
+        )
+        present(UINavigationController(rootViewController: preview), animated: true)
     }
 }
 
@@ -1749,6 +1844,28 @@ extension VirtualizedTopicDetailViewController: TopicDetailBottomBarDelegate {
             presentation.prefersGrabberVisible = true
         }
         present(sheet, animated: true)
+    }
+
+    func bottomBarDidTapReadBoost() {
+        let sheet = ReadBoostSheetViewController(
+            api: api,
+            topicId: topicId,
+            currentPosition: currentVisibleFloor(),
+            totalReplies: readBoostTotalReplies()
+        )
+        let navigation = UINavigationController(rootViewController: sheet)
+        if let presentation = navigation.sheetPresentationController {
+            presentation.detents = [.medium(), .large()]
+            presentation.prefersGrabberVisible = true
+        }
+        present(navigation, animated: true)
+    }
+
+    /// Highest post number worth reporting. `posts_count` counts every post in
+    /// the topic including ones the stream hasn't loaded, which is exactly the
+    /// range ReadBoost wants to sweep.
+    private func readBoostTotalReplies() -> Int {
+        max(viewModel.topic?.postsCount ?? 0, viewModel.totalFloors)
     }
 
     func bottomBarDidToggleReverseOrder() {

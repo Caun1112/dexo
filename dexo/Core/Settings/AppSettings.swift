@@ -334,6 +334,38 @@ final class AppSettings {
         defaults.integer(forKey: "linuxDoReadTimingsActivationGeneration")
     }
 
+    // MARK: - Share Image
+
+    /// Last picked palette in the share-image preview.
+    var shareImageThemeIndex: Int {
+        get { defaults.integer(forKey: "shareImageThemeIndex") }
+        set { defaults.set(newValue, forKey: "shareImageThemeIndex") }
+    }
+
+    /// Which sections the share card draws. Every section ships enabled, so
+    /// each flag reads its stored value only once the user has toggled it.
+    var shareImageOptions: ShareImageOptions {
+        get {
+            func flag(_ key: String) -> Bool {
+                defaults.object(forKey: key) == nil ? true : defaults.bool(forKey: key)
+            }
+            return ShareImageOptions(
+                showsSite: flag("shareImageShowsSite"),
+                showsTitle: flag("shareImageShowsTitle"),
+                showsAuthor: flag("shareImageShowsAuthor"),
+                showsContent: flag("shareImageShowsContent"),
+                showsLink: flag("shareImageShowsLink")
+            )
+        }
+        set {
+            defaults.set(newValue.showsSite, forKey: "shareImageShowsSite")
+            defaults.set(newValue.showsTitle, forKey: "shareImageShowsTitle")
+            defaults.set(newValue.showsAuthor, forKey: "shareImageShowsAuthor")
+            defaults.set(newValue.showsContent, forKey: "shareImageShowsContent")
+            defaults.set(newValue.showsLink, forKey: "shareImageShowsLink")
+        }
+    }
+
     // MARK: - DNS over HTTPS
 
     struct DoHServer: Codable, Equatable, Identifiable, Sendable {

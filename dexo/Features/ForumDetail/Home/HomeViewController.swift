@@ -125,6 +125,33 @@ final class HomeViewController: ObservableViewController {
     private let composeButtonEdgeMargin: CGFloat = 20
     private var composeDragDistance: CGFloat = 0
 
+    /// Thumb-reachable twin of the nav-bar category filter. The nav bar sits in
+    /// the top-left corner, which one-handed right-thumb users can't reach on a
+    /// large phone, so the same menu is mirrored just above the compose FAB.
+    private let categoryFloatingButtonSize: CGFloat = 46
+    /// Gap between the compose FAB and the filter button stacked above it.
+    private let categoryFloatingButtonSpacing: CGFloat = 12
+
+    private lazy var categoryFloatingButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        button.setImage(
+            UIImage(systemName: "line.3.horizontal.decrease", withConfiguration: config),
+            for: .normal
+        )
+        button.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        button.tintColor = ThemeManager.shared.accentColor
+        button.layer.cornerRadius = categoryFloatingButtonSize / 2
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.2
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 4
+        button.showsMenuAsPrimaryAction = true
+        button.accessibilityLabel = String(localized: "home.filter.accessibility.label")
+        button.accessibilityHint = String(localized: "home.filter.accessibility.hint")
+        return button
+    }()
+
     private lazy var composeButton: UIButton = {
         let button = UIButton(type: .system)
         let config = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
@@ -176,6 +203,7 @@ final class HomeViewController: ObservableViewController {
                 y: safe.maxY - composeButtonEdgeMargin - composeButtonSize / 2
             )
         }
+        syncCategoryFloatingButtonPosition()
 
         if tableView.tableHeaderView === pinnedBar,
            pinnedBar.frame.width != tableView.bounds.width {
@@ -252,6 +280,13 @@ final class HomeViewController: ObservableViewController {
 
         view.addSubview(composeButton)
         composeButton.frame = CGRect(x: 0, y: 0, width: composeButtonSize, height: composeButtonSize)
+        view.addSubview(categoryFloatingButton)
+        categoryFloatingButton.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: categoryFloatingButtonSize,
+            height: categoryFloatingButtonSize
+        )
 
         Task {
             await viewModel.loadTopics()
@@ -295,7 +330,11 @@ final class HomeViewController: ObservableViewController {
         tableView.isHidden = false
         navigationItem.rightBarButtonItems = inheritedRightBarItems + [Self.makeRightBarSpacer(), sortBarButton]
         composeButton.backgroundColor = ThemeManager.shared.accentColor
-        categoryButton.menu = UIMenu(title: "", children: buildCategoryMenuElements())
+        let categoryMenu = UIMenu(title: "", children: buildCategoryMenuElements())
+        categoryButton.menu = categoryMenu
+        categoryFloatingButton.menu = categoryMenu
+        categoryFloatingButton.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        categoryFloatingButton.tintColor = ThemeManager.shared.accentColor
         sortBarButton.menu = buildSortMenu()
         updateCategoryButton()
         // Show non-login errors (e.g. rate limit) when topic list is empty
@@ -391,6 +430,7 @@ final class HomeViewController: ObservableViewController {
                 x: composeButton.center.x + translation.x,
                 y: composeButton.center.y + translation.y
             )
+            syncCategoryFloatingButtonPosition()
             composeDragDistance += abs(translation.x) + abs(translation.y)
             gesture.setTranslation(.zero, in: view)
         case .ended, .cancelled:
@@ -398,6 +438,22 @@ final class HomeViewController: ObservableViewController {
         default:
             break
         }
+    }
+
+    /// Keep the filter button riding directly above the compose FAB, including
+    /// while the FAB is being dragged around.
+    private func syncCategoryFloatingButtonPosition() {
+        guard view.bounds.width > 0 else { return }
+        let safe = view.safeAreaLayoutGuide.layoutFrame
+        let half = categoryFloatingButtonSize / 2
+        let offset = composeButtonSize / 2 + categoryFloatingButtonSpacing + half
+        // If the FAB sits high enough that the filter would clip off the top,
+        // flip it below instead.
+        let above = composeButton.center.y - offset
+        let below = composeButton.center.y + offset
+        let minY = safe.minY + half
+        let y = above >= minY ? above : min(below, safe.maxY - half)
+        categoryFloatingButton.center = CGPoint(x: composeButton.center.x, y: y)
     }
 
     private func snapComposeButtonToEdge(velocity: CGPoint) {
@@ -429,6 +485,7 @@ final class HomeViewController: ObservableViewController {
             options: .curveEaseOut
         ) {
             self.composeButton.center = CGPoint(x: targetX, y: targetY)
+            self.syncCategoryFloatingButtonPosition()
         }
     }
 

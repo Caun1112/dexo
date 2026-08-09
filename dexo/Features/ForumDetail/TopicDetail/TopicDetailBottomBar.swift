@@ -6,6 +6,8 @@ protocol TopicDetailBottomBarDelegate: AnyObject {
     func bottomBarDidToggleReverseOrder()
     func bottomBarDidToggleSummaryMode()
     func bottomBarDidTapReply()
+    /// Tap the ReadBoost pill — opens the settings / start-stop sheet.
+    func bottomBarDidTapReadBoost()
     /// Whether the reverse / summary modes are currently active.
     var bottomBarIsReverseOrder: Bool { get }
     var bottomBarIsSummaryMode: Bool { get }
@@ -19,14 +21,34 @@ protocol TopicDetailBottomBarDelegate: AnyObject {
     func bottomBarDidEndScrub(cancelled: Bool)
 }
 
+extension TopicDetailBottomBarDelegate {
+    /// Screens that don't surface the ReadBoost pill don't have to implement it.
+    func bottomBarDidTapReadBoost() {}
+}
+
 final class TopicDetailBottomBar: UIView {
     weak var delegate: TopicDetailBottomBarDelegate?
 
     private static let buttonSize: CGFloat = 44
 
+    /// `rocket` only exists from iOS 16.1, and the deployment target is 16.0.
+    private static var readBoostSymbolName: String {
+        UIImage(systemName: "rocket") != nil ? "rocket" : "bolt.fill"
+    }
+
     private(set) lazy var opOnlyButton = makeCircularButton(icon: "person", a11yLabel: String(localized: "topic.bottombar.op_only"))
     private(set) lazy var jumpToFloorButton = makeCircularButton(icon: "number", a11yLabel: String(localized: "topic.bottombar.jump_to_floor"))
+    private(set) lazy var readBoostButton = makeCircularButton(icon: Self.readBoostSymbolName, a11yLabel: String(localized: "readboost.title"))
     private lazy var replyButton = makeCircularButton(icon: "arrowshape.turn.up.left", a11yLabel: String(localized: "reply.title"))
+
+    /// Show the ReadBoost pill. Off by default so screens that never wired the
+    /// delegate method don't grow a dead button.
+    var showsReadBoost: Bool = false {
+        didSet {
+            guard oldValue != showsReadBoost else { return }
+            readBoostButton.isHidden = !showsReadBoost
+        }
+    }
 
     /// Hide the OP-filter and jump-to-floor pills when the topic is being
     /// shown as a reply tree — neither floor numbers nor the OP filter make
@@ -40,7 +62,7 @@ final class TopicDetailBottomBar: UIView {
     }
 
     private lazy var stackView: UIStackView = {
-        let sv = UIStackView(arrangedSubviews: [opOnlyButton, jumpToFloorButton, replyButton])
+        let sv = UIStackView(arrangedSubviews: [opOnlyButton, jumpToFloorButton, readBoostButton, replyButton])
         sv.axis = .horizontal
         sv.spacing = 12
         sv.alignment = .center
@@ -57,6 +79,8 @@ final class TopicDetailBottomBar: UIView {
 
         opOnlyButton.addTarget(self, action: #selector(opOnlyTapped), for: .touchUpInside)
         jumpToFloorButton.addTarget(self, action: #selector(jumpToFloorTapped), for: .touchUpInside)
+        readBoostButton.addTarget(self, action: #selector(readBoostTapped), for: .touchUpInside)
+        readBoostButton.isHidden = !showsReadBoost
         replyButton.addTarget(self, action: #selector(replyTapped), for: .touchUpInside)
 
         // Long-press + drag the jump button to scrub through floors. We don't
@@ -84,6 +108,8 @@ final class TopicDetailBottomBar: UIView {
             opOnlyButton.heightAnchor.constraint(equalToConstant: size),
             jumpToFloorButton.widthAnchor.constraint(equalToConstant: size),
             jumpToFloorButton.heightAnchor.constraint(equalToConstant: size),
+            readBoostButton.widthAnchor.constraint(equalToConstant: size),
+            readBoostButton.heightAnchor.constraint(equalToConstant: size),
             replyButton.widthAnchor.constraint(equalToConstant: size),
             replyButton.heightAnchor.constraint(equalToConstant: size),
         ])
@@ -98,6 +124,15 @@ final class TopicDetailBottomBar: UIView {
 
     func setOPOnlySelected(_ selected: Bool) {
         updateButtonAppearance(opOnlyButton, selected: selected)
+    }
+
+    /// Reflect the current ReadBoost run: a stop glyph plus the accent
+    /// highlight while a sweep is in flight, the rocket otherwise.
+    func setReadBoostRunning(_ running: Bool) {
+        readBoostButton.configuration?.image = UIImage(
+            systemName: running ? "stop.fill" : Self.readBoostSymbolName
+        )
+        updateButtonAppearance(readBoostButton, selected: running)
     }
 
     private func updateButtonAppearance(_ button: UIButton, selected: Bool) {
@@ -185,6 +220,10 @@ final class TopicDetailBottomBar: UIView {
 
     @objc private func jumpToFloorTapped() {
         delegate?.bottomBarDidTapJumpToFloor()
+    }
+
+    @objc private func readBoostTapped() {
+        delegate?.bottomBarDidTapReadBoost()
     }
 
     /// No-op since the long-press menu was replaced by the scrubber gesture;

@@ -948,6 +948,31 @@ final class DiscourseAPI {
         }
     }
 
+    /// Batch timing upload driven by ReadBoost.
+    ///
+    /// Unlike `postTopicTimings` this reports the raw status code instead of
+    /// throwing, and stays out of the shared circuit breaker / timing-report
+    /// log: ReadBoost issues hundreds of deliberate POSTs with its own retry
+    /// and backoff loop, so a transient 429 must not shut down the passive
+    /// read tracking that runs alongside it.
+    /// - Returns: the HTTP status code, or nil when the request never completed.
+    func postReadBoostTimings(topicId: Int, topicTime: Int, timings: [Int: Int]) async -> Int? {
+        guard !timings.isEmpty else { return nil }
+        let route = DiscourseRouter.topicTimings
+        let url = baseURL + route.path
+        let stringKeyed = Dictionary(uniqueKeysWithValues: timings.map { (String($0.key), $0.value) })
+        let parameters: Parameters = [
+            "topic_id": topicId,
+            "topic_time": topicTime,
+            "timings": stringKeyed,
+        ]
+        let response = await session.request(url, method: route.method, parameters: parameters, encoding: URLEncoding.default)
+            .serializingData().response
+        let statusCode = response.response?.statusCode
+        debugLog("[DiscourseAPI] readboost timings topic=\(topicId) posts=\(timings.count) status=\(statusCode ?? 0)")
+        return statusCode
+    }
+
     private var topicTimingsCircuitBreaker = TopicTimingCircuitBreaker()
     private var lastTopicTimingsReportingEnabled: Bool?
     private var lastTopicTimingsActivationGeneration: Int?
