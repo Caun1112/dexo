@@ -46,6 +46,13 @@ jobs:
           cp -r build/dexo.xcarchive/Products/Applications/dexo.app build/Payload/
           cd build && zip -r dexo-unsigned.ipa Payload
 
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dexo-unsigned-ipa
+          path: build/dexo-unsigned.ipa
+          if-no-files-found: error
+
       - name: Read version
         id: version
         run: |
@@ -53,7 +60,10 @@ jobs:
           test -n "$VERSION"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
+      # Tag + Release only for main. A manual run on a feature branch stops at
+      # the artifact above so test builds don't pollute the release history.
       - name: Create tag and Release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
