@@ -36,6 +36,29 @@ final class TopicDetailBottomBar: UIView {
         UIImage(systemName: "rocket") != nil ? "rocket" : "bolt.fill"
     }
 
+    private static let readBoostRingWidth: CGFloat = 3
+
+    /// Faint full circle the progress arc runs on top of.
+    private lazy var readBoostTrackRing: CAShapeLayer = {
+        let layer = CAShapeLayer()
+        layer.fillColor = UIColor.clear.cgColor
+        layer.lineWidth = Self.readBoostRingWidth
+        layer.isHidden = true
+        return layer
+    }()
+
+    /// Accent-coloured arc whose `strokeEnd` tracks the sweep's progress.
+    private lazy var readBoostProgressRing: CAShapeLayer = {
+        let layer = CAShapeLayer()
+        layer.fillColor = UIColor.clear.cgColor
+        layer.lineWidth = Self.readBoostRingWidth
+        layer.lineCap = .round
+        layer.strokeStart = 0
+        layer.strokeEnd = 0
+        layer.isHidden = true
+        return layer
+    }()
+
     private(set) lazy var opOnlyButton = makeCircularButton(icon: "person", a11yLabel: String(localized: "topic.bottombar.op_only"))
     private(set) lazy var jumpToFloorButton = makeCircularButton(icon: "number", a11yLabel: String(localized: "topic.bottombar.jump_to_floor"))
     private(set) lazy var readBoostButton = makeCircularButton(icon: Self.readBoostSymbolName, a11yLabel: String(localized: "readboost.title"))
@@ -81,6 +104,8 @@ final class TopicDetailBottomBar: UIView {
         jumpToFloorButton.addTarget(self, action: #selector(jumpToFloorTapped), for: .touchUpInside)
         readBoostButton.addTarget(self, action: #selector(readBoostTapped), for: .touchUpInside)
         readBoostButton.isHidden = !showsReadBoost
+        readBoostButton.layer.addSublayer(readBoostTrackRing)
+        readBoostButton.layer.addSublayer(readBoostProgressRing)
         replyButton.addTarget(self, action: #selector(replyTapped), for: .touchUpInside)
 
         // Long-press + drag the jump button to scrub through floors. We don't
@@ -126,13 +151,49 @@ final class TopicDetailBottomBar: UIView {
         updateButtonAppearance(opOnlyButton, selected: selected)
     }
 
-    /// Reflect the current ReadBoost run: a stop glyph plus the accent
-    /// highlight while a sweep is in flight, the rocket otherwise.
-    func setReadBoostRunning(_ running: Bool) {
+    /// Reflect the current ReadBoost run: a stop glyph inside a ring that fills
+    /// clockwise with progress. The button keeps its glass background — a solid
+    /// fill would hide the ring.
+    func setReadBoostRunning(_ running: Bool, progress: Double?) {
         readBoostButton.configuration?.image = UIImage(
             systemName: running ? "stop.fill" : Self.readBoostSymbolName
         )
-        updateButtonAppearance(readBoostButton, selected: running)
+        let accent = ThemeManager.shared.accentColor
+        readBoostButton.configuration?.baseForegroundColor = running ? accent : .label
+        readBoostProgressRing.isHidden = !running
+        readBoostTrackRing.isHidden = !running
+        guard running else { return }
+        // Theme-dependent colors belong in display-time code, not init.
+        readBoostProgressRing.strokeColor = accent.cgColor
+        readBoostTrackRing.strokeColor = UIColor.tertiaryLabel.withAlphaComponent(0.35).cgColor
+        layoutReadBoostRing()
+        // No ring for an indeterminate start: show a thin arc so the button
+        // still reads as active before the first batch lands.
+        // The implicit CALayer animation is what makes it creep around.
+        readBoostProgressRing.strokeEnd = CGFloat(progress ?? 0.02)
+    }
+
+    private func layoutReadBoostRing() {
+        let size = Self.buttonSize
+        let inset = Self.readBoostRingWidth / 2 + 1
+        let rect = CGRect(x: 0, y: 0, width: size, height: size).insetBy(dx: inset, dy: inset)
+        readBoostProgressRing.frame = CGRect(x: 0, y: 0, width: size, height: size)
+        readBoostTrackRing.frame = readBoostProgressRing.frame
+        // Start at 12 o'clock and sweep clockwise.
+        let path = UIBezierPath(
+            arcCenter: CGPoint(x: size / 2, y: size / 2),
+            radius: rect.width / 2,
+            startAngle: -.pi / 2,
+            endAngle: .pi * 1.5,
+            clockwise: true
+        ).cgPath
+        readBoostProgressRing.path = path
+        readBoostTrackRing.path = path
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if !readBoostProgressRing.isHidden { layoutReadBoostRing() }
     }
 
     private func updateButtonAppearance(_ button: UIButton, selected: Bool) {

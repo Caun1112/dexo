@@ -37,6 +37,15 @@ enum ReadBoostStatus {
     case stopping
     case completed
     case failed
+    /// Cloudflare intercepted a batch; the run is paused while the user clears
+    /// the challenge, and resumes on its own if they don't.
+    case awaitingChallenge
+}
+
+extension Notification.Name {
+    /// Posted when a ReadBoost batch hits a Cloudflare challenge. The topic
+    /// screen listens and opens the challenge page so the user can tap through.
+    static let readBoostChallengeRequired = Notification.Name("readBoostChallengeRequired")
 }
 
 /// Drives the ReadBoost batch upload of `/topics/timings`.
@@ -52,6 +61,10 @@ final class ReadBoostManager {
     static let maxBatchRetries = 6
     /// Pause between retries of the same batch.
     private static let retryDelayMilliseconds = 2000
+    /// How long a Cloudflare pause waits for the user before resuming anyway.
+    /// Long enough to solve the challenge by hand, short enough that a run
+    /// left unattended in the background keeps making progress.
+    private static let challengeWaitMilliseconds = 90_000
 
     private let defaults: UserDefaults
 
@@ -67,6 +80,9 @@ final class ReadBoostManager {
     private var runTask: Task<Void, Never>?
     private var shouldStop = false
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+    /// Set when the user finishes (or dismisses) the challenge page, so a
+    /// paused run picks up immediately instead of waiting out the timeout.
+    private var challengeCleared = false
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -79,7 +95,7 @@ final class ReadBoostManager {
     }
 
     var isRunning: Bool {
-        status == .running || status == .stopping
+        status == .running || status == .stopping || status == .awaitingChallenge
     }
 
     /// Fraction of the topic uploaded so far, or nil before the first batch lands.
@@ -269,6 +285,9 @@ final class ReadBoostManager {
         config: ReadBoostConfig
     ) async -> BatchOutcome {
         var remainingRetries = Self.maxBatchRetries
+        // Clearing a challenge buys a free retry, but only a few — otherwise a
+        // forum that challenges every single request would loop forever.
+        var freeChallengeRetries = 3
         while true {
             if shouldStop { return .stopped }
 
@@ -281,14 +300,14 @@ final class ReadBoostManager {
                 in: (config.minReadTime * count) ... (config.maxReadTime * count)
             )
 
-            let statusCode = await api.postReadBoostTimings(
+            let result = await api.postReadBoostTimings(
                 topicId: topicId,
                 topicTime: topicTime,
                 timings: timings
             )
             if shouldStop { return .stopped }
 
-            if let statusCode, (200 ..< 400).contains(statusCode) {
+            if result.isSuccess {
                 processedEnd = end
                 let percent = Int((Double(end) / Double(totalReplies) * 100).rounded())
                 message = String(localized: "readboost.status.processing \(start) \(end) \(percent)")
@@ -297,13 +316,57 @@ final class ReadBoostManager {
                 return .success
             }
 
-            guard remainingRetries > 0 else { return .failed(statusCode: statusCode) }
+            // Cloudflare: ask the UI to open the challenge page, then hold this
+            // batch until the user clears it — or until the wait times out, so
+            // an unattended run still resumes on its own.
+            if result.needsChallenge {
+                status = .awaitingChallenge
+                message = String(localized: "readboost.status.challenge")
+                challengeCleared = false
+                NotificationCenter.default.post(name: .readBoostChallengeRequired, object: self)
+                let stopped = await waitForChallenge()
+                if stopped { return .stopped }
+                status = .running
+                // A cleared challenge doesn't count against the retry budget —
+                // the batch never really failed, it was intercepted.
+                if challengeCleared, freeChallengeRetries > 0 {
+                    challengeCleared = false
+                    freeChallengeRetries -= 1
+                    continue
+                }
+                challengeCleared = false
+            }
+
+            guard remainingRetries > 0 else {
+                return .failed(statusCode: result.statusCode)
+            }
             remainingRetries -= 1
             message = String(localized: "readboost.status.retrying \(start) \(end) \(remainingRetries)")
             if await sleepCheckingStop(milliseconds: Self.retryDelayMilliseconds) {
                 return .stopped
             }
         }
+    }
+
+    /// Called by the UI once the challenge page closes, so the paused batch
+    /// retries right away rather than sitting out the remaining wait.
+    func challengeDidResolve() {
+        guard status == .awaitingChallenge else { return }
+        challengeCleared = true
+    }
+
+    /// Hold a batch while the user works through the Cloudflare page.
+    /// Returns true when the run should stop.
+    private func waitForChallenge() async -> Bool {
+        var remaining = Self.challengeWaitMilliseconds
+        while remaining > 0 {
+            if shouldStop { return true }
+            if challengeCleared { return false }
+            let step = min(200, remaining)
+            try? await Task.sleep(for: .milliseconds(step))
+            remaining -= step
+        }
+        return shouldStop
     }
 
     /// Sleep in short slices so a stop request lands promptly instead of after

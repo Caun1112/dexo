@@ -2,6 +2,16 @@ import UIKit
 import WebKit
 
 extension UIViewController {
+    /// True when this controller is a challenge page, or a navigation stack
+    /// hosting one — used to avoid stacking a second challenge on the first.
+    var containsChallengeViewController: Bool {
+        if self is ChallengeViewController { return true }
+        if let nav = self as? UINavigationController {
+            return nav.viewControllers.contains { $0 is ChallengeViewController }
+        }
+        return false
+    }
+
     /// Presents the shared Cloudflare challenge prompt and opens the existing
     /// linux.do challenge page when the user chooses to continue.
     func presentChallengePrompt(
@@ -48,6 +58,9 @@ extension UIViewController {
 final class ChallengeViewController: BaseViewController {
     private let targetURL: URL
     private let userAgent: String?
+
+    /// Invoked once, after the page closes and cookies have been synced.
+    var onDismiss: (() -> Void)?
 
     private var webView: WKWebView?
     private var proxyLease: AnyObject?
@@ -242,12 +255,19 @@ final class ChallengeViewController: BaseViewController {
             webView?.configuration.websiteDataStore.httpCookieStore.remove(coordinator)
             isObservingCookieChanges = false
         }
+        if view.window == nil, let onDismiss {
+            self.onDismiss = nil
+            onDismiss()
+        }
     }
 
     /// Convenience for presenting the challenge flow from any view controller.
-    static func present(from presenter: UIViewController) {
+    /// `onDismiss` fires once the page closes — the refreshed cookies are
+    /// already synced by then, so callers can retry their request immediately.
+    static func present(from presenter: UIViewController, onDismiss: (() -> Void)? = nil) {
         guard let url = URL(string: "https://linux.do/challenge") else { return }
         let vc = ChallengeViewController(targetURL: url, userAgent: WebCookieStore.shared.userAgent)
+        vc.onDismiss = onDismiss
         let nav = UINavigationController(rootViewController: vc)
         nav.modalPresentationStyle = .pageSheet
         presenter.present(nav, animated: true)

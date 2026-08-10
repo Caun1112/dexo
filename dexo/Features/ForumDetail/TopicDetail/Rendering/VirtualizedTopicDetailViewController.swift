@@ -523,6 +523,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
         NotificationCenter.default.addObserver(self, selector: #selector(renderEnvironmentChanged), name: FontManager.fontDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(appDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(appWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(readBoostNeedsChallenge), name: .readBoostChallengeRequired, object: nil)
         Task { await initialLoad() }
         Task {
             await api.loadOrFetchEmojiMap()
@@ -656,9 +657,9 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
     /// perception-tracking loop refreshes them as the sweep advances.
     private func updateReadBoostControls() {
         let manager = ReadBoostManager.shared
-        bottomBar.setReadBoostRunning(manager.isRunning)
-
         let percent = manager.progressPercent
+        bottomBar.setReadBoostRunning(manager.isRunning, progress: manager.progress)
+
         let showsPercent = manager.isRunning && manager.topicId == topicId && percent != nil
         if showsPercent {
             readBoostPercentLabel.text = "\(percent ?? 0)%"
@@ -1486,6 +1487,23 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
 
     @objc private func floatingBackTapped() {
         navigationController?.popViewController(animated: true)
+    }
+
+    /// A ReadBoost batch was intercepted by Cloudflare. Open the challenge page
+    /// right away — leaving it to a silent 403 is what stalls unattended runs —
+    /// and tell the manager to resume as soon as it closes.
+    @objc private func readBoostNeedsChallenge() {
+        guard api.isLinuxDo, view.window != nil else { return }
+        // The ReadBoost sheet is usually still up, so present from whatever is
+        // topmost. Bail out if a challenge is already on screen.
+        var presenter: UIViewController = self
+        while let next = presenter.presentedViewController {
+            if next.containsChallengeViewController { return }
+            presenter = next
+        }
+        ChallengeViewController.present(from: presenter) {
+            ReadBoostManager.shared.challengeDidResolve()
+        }
     }
 
     private func requireAuthentication(_ action: @escaping () -> Void) {

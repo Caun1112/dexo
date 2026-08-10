@@ -4293,6 +4293,22 @@
         }
       }
     },
+    "readboost.status.challenge": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloudflare check required — complete it to resume"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要通过 Cloudflare 验证，完成后自动继续"
+          }
+        }
+      }
+    },
     "readboost.status.completed": {
       "localizations": {
         "en": {

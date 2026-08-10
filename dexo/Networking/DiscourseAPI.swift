@@ -948,16 +948,34 @@ final class DiscourseAPI {
         }
     }
 
+    /// Outcome of one ReadBoost batch upload.
+    struct ReadBoostUploadResult {
+        let statusCode: Int?
+        /// True when Cloudflare intercepted the request with a challenge page,
+        /// which the user has to clear interactively before uploads resume.
+        let needsChallenge: Bool
+
+        var isSuccess: Bool {
+            guard let statusCode else { return false }
+            return (200 ..< 400).contains(statusCode) && !needsChallenge
+        }
+    }
+
     /// Batch timing upload driven by ReadBoost.
     ///
-    /// Unlike `postTopicTimings` this reports the raw status code instead of
-    /// throwing, and stays out of the shared circuit breaker / timing-report
-    /// log: ReadBoost issues hundreds of deliberate POSTs with its own retry
-    /// and backoff loop, so a transient 429 must not shut down the passive
-    /// read tracking that runs alongside it.
-    /// - Returns: the HTTP status code, or nil when the request never completed.
-    func postReadBoostTimings(topicId: Int, topicTime: Int, timings: [Int: Int]) async -> Int? {
-        guard !timings.isEmpty else { return nil }
+    /// Unlike `postTopicTimings` this reports the outcome instead of throwing,
+    /// and stays out of the shared circuit breaker / timing-report log:
+    /// ReadBoost issues hundreds of deliberate POSTs with its own retry and
+    /// backoff loop, so a transient 429 must not shut down the passive read
+    /// tracking that runs alongside it.
+    func postReadBoostTimings(
+        topicId: Int,
+        topicTime: Int,
+        timings: [Int: Int]
+    ) async -> ReadBoostUploadResult {
+        guard !timings.isEmpty else {
+            return ReadBoostUploadResult(statusCode: nil, needsChallenge: false)
+        }
         let route = DiscourseRouter.topicTimings
         let url = baseURL + route.path
         let stringKeyed = Dictionary(uniqueKeysWithValues: timings.map { (String($0.key), $0.value) })
@@ -968,9 +986,14 @@ final class DiscourseAPI {
         ]
         let response = await session.request(url, method: route.method, parameters: parameters, encoding: URLEncoding.default)
             .serializingData().response
-        let statusCode = response.response?.statusCode
-        debugLog("[DiscourseAPI] readboost timings topic=\(topicId) posts=\(timings.count) status=\(statusCode ?? 0)")
-        return statusCode
+        let assessment = assessTopicTimingResponse(
+            statusCode: response.response?.statusCode,
+            data: response.data,
+            errorDescription: response.error?.localizedDescription
+        )
+        let needsChallenge = assessment.outcome == .cloudflareChallenge
+        debugLog("[DiscourseAPI] readboost timings topic=\(topicId) posts=\(timings.count) status=\(assessment.statusCode ?? 0) challenge=\(needsChallenge)")
+        return ReadBoostUploadResult(statusCode: assessment.statusCode, needsChallenge: needsChallenge)
     }
 
     private var topicTimingsCircuitBreaker = TopicTimingCircuitBreaker()
