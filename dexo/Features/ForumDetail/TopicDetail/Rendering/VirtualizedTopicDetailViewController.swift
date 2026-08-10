@@ -2367,6 +2367,39 @@ extension VirtualizedTopicDetailViewController: PostCellDelegate {
     }
 
     func postCell(didLongPressPost post: DiscourseTopicDetail.Post) {
+        // Long-press used to jump straight into the raw-markdown sheet. Offer
+        // the share-as-image export alongside it — that's the action people
+        // actually reach for on a post they want to pass along.
+        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(
+            title: String(localized: "share_image.action.title"),
+            style: .default
+        ) { [weak self] _ in
+            self?.presentShareImage(for: post)
+        })
+        sheet.addAction(UIAlertAction(
+            title: String(localized: "post.view_raw"),
+            style: .default
+        ) { [weak self] _ in
+            self?.presentRawContent(for: post)
+        })
+        sheet.addAction(UIAlertAction(
+            title: String(localized: "post.copy_link"),
+            style: .default
+        ) { [weak self] _ in
+            guard let self else { return }
+            UIPasteboard.general.string = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
+        })
+        sheet.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+            popover.permittedArrowDirections = []
+        }
+        present(sheet, animated: true)
+    }
+
+    private func presentRawContent(for post: DiscourseTopicDetail.Post) {
         Task {
             do {
                 let detail = try await api.fetchPost(id: post.id)

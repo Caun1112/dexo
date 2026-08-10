@@ -3455,6 +3455,22 @@
         }
       }
     },
+    "post.view_raw": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View source"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看原文"
+          }
+        }
+      }
+    },
     "push.encrypted_fallback.body": {
       "extractionState": "stale",
       "localizations": {
