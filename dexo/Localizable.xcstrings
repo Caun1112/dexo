@@ -4474,13 +4474,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Read-timing uploads are off for this forum. Turn them on in Settings first."
+            "value": "Read-time reporting is off for this forum. Turn on \"Report read time to linux.do\" under Settings › Read Tracking."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "该论坛的阅读上报已关闭，请先在设置中开启。"
+            "value": "该论坛的阅读上报已关闭。请到「设置 › 阅读上报」中打开「向 linux.do 上报阅读时间」。"
           }
         }
       }
@@ -6174,6 +6174,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "网络"
+          }
+        }
+      }
+    },
+    "settings.section.read_timings": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read Tracking"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阅读上报"
           }
         }
       }

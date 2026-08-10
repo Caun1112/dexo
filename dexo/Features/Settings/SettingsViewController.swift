@@ -47,6 +47,7 @@ final class SettingsViewController: ObservableViewController {
 
     private enum Section: Int, CaseIterable {
         case general
+        case reading
         case appearance
         case storage
         case about
@@ -59,9 +60,9 @@ final class SettingsViewController: ObservableViewController {
     /// Sections actually shown in the table, in order.
     private var visibleSections: [Section] {
         #if DEBUG
-        return [.general, .appearance, .network, .storage, .about, .debug]
+        return [.general, .reading, .appearance, .network, .storage, .about, .debug]
         #else
-        return [.general, .appearance, .network, .storage, .about]
+        return [.general, .reading, .appearance, .network, .storage, .about]
         #endif
     }
 
@@ -77,6 +78,14 @@ final class SettingsViewController: ObservableViewController {
         case boostDisplay
     }
 
+    /// Read-timing controls. These used to live in the DEBUG-only section,
+    /// which meant a release build had no way to opt into linux.do timing
+    /// uploads — and therefore no way to use ReadBoost there.
+    private enum ReadingRow: Int, CaseIterable {
+        case linuxDoReadTimings
+        case timingReports
+    }
+
     private func networkRows() -> [NetworkRow] {
         [.dohSettings]
     }
@@ -90,8 +99,6 @@ final class SettingsViewController: ObservableViewController {
         case renderPreview
         case webViewProxyTest
         case urlSessionProxyTest
-        case linuxDoReadTimings
-        case timingReports
     }
     #endif
 }
@@ -106,6 +113,7 @@ extension SettingsViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch visibleSections[section] {
         case .general: return GeneralRow.allCases.count
+        case .reading: return ReadingRow.allCases.count
         case .appearance: return AppearanceRow.allCases.count
         case .storage: return 1
         case .about: return 1
@@ -119,6 +127,7 @@ extension SettingsViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch visibleSections[section] {
         case .general: return String(localized: "settings.section.general")
+        case .reading: return String(localized: "settings.section.read_timings")
         case .appearance: return String(localized: "settings.section.appearance")
         case .storage: return String(localized: "settings.section.storage")
         case .about: return String(localized: "settings.section.about")
@@ -133,10 +142,8 @@ extension SettingsViewController: UITableViewDataSource {
         switch visibleSections[section] {
         case .network:
             return String(localized: "settings.doh.root.footer")
-        #if DEBUG
-        case .debug:
+        case .reading:
             return String(localized: "settings.read_timings.footer")
-        #endif
         default:
             return nil
         }
@@ -150,6 +157,13 @@ extension SettingsViewController: UITableViewDataSource {
                 return makeAutoOpenCell(tableView, indexPath: indexPath)
             case .boostDisplay:
                 return makeBoostDisplayCell(tableView, indexPath: indexPath)
+            }
+        case .reading:
+            switch ReadingRow(rawValue: indexPath.row)! {
+            case .linuxDoReadTimings:
+                return makeLinuxDoReadTimingsCell(tableView, indexPath: indexPath)
+            case .timingReports:
+                return makeTimingReportsCell(tableView, indexPath: indexPath)
             }
         case .appearance:
             switch AppearanceRow(rawValue: indexPath.row)! {
@@ -175,10 +189,6 @@ extension SettingsViewController: UITableViewDataSource {
         #if DEBUG
         case .debug:
             switch DebugRow(rawValue: indexPath.row)! {
-            case .linuxDoReadTimings:
-                return makeLinuxDoReadTimingsCell(tableView, indexPath: indexPath)
-            case .timingReports:
-                return makeTimingReportsCell(tableView, indexPath: indexPath)
             case .renderPreview:
                 return makeRenderPreviewCell(tableView, indexPath: indexPath)
             case .webViewProxyTest:
@@ -359,6 +369,13 @@ extension SettingsViewController: UITableViewDelegate {
             case .boostDisplay:
                 showBoostDisplayPicker(from: sourceView)
             }
+        case .reading:
+            switch ReadingRow(rawValue: indexPath.row)! {
+            case .linuxDoReadTimings:
+                break
+            case .timingReports:
+                navigationController?.pushViewController(TopicTimingReportsViewController(), animated: true)
+            }
         case .appearance:
             switch AppearanceRow(rawValue: indexPath.row)! {
             case .appearanceMode:
@@ -389,10 +406,6 @@ extension SettingsViewController: UITableViewDelegate {
         #if DEBUG
         case .debug:
             switch DebugRow(rawValue: indexPath.row)! {
-            case .linuxDoReadTimings:
-                break
-            case .timingReports:
-                navigationController?.pushViewController(TopicTimingReportsViewController(), animated: true)
             case .renderPreview:
                 showRenderPreviewInput()
             case .webViewProxyTest:
