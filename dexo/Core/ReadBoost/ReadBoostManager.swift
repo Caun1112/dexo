@@ -350,7 +350,12 @@ final class ReadBoostManager {
 
     /// Called by the UI once the challenge page closes, so the paused batch
     /// retries right away rather than sitting out the remaining wait.
+    ///
+    /// Clearing the challenge also restores linux.do read-time reporting: a
+    /// Cloudflare interception is exactly what trips the auto-shutdown, and
+    /// making the user go re-arm a switch they never touched is pure friction.
     func challengeDidResolve() {
+        AppSettings.shared.linuxDoReadTimingsEnabled = true
         guard status == .awaitingChallenge else { return }
         challengeCleared = true
     }

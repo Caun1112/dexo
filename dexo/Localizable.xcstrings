@@ -6053,13 +6053,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dexo stopped linux.do read-time reporting after 3 consecutive failures. Complete the site verification before enabling it again in Settings."
+            "value": "Dexo stopped linux.do read-time reporting after 3 consecutive failures. Clear the site verification first, then turn it back on."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "linux.do 阅读时间上报已连续失败 3 次，Dexo 已自动关闭。请先完成站点验证，再到设置中手动开启。"
+            "value": "linux.do 阅读时间上报已连续失败 3 次，Dexo 已自动关闭。请先完成站点验证，再重新开启。"
           }
         }
       }
@@ -6086,13 +6086,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "linux.do reporting is off by default and may trigger site protection. After 3 consecutive failures, including a Cloudflare challenge, Dexo turns it off automatically. Complete the challenge before enabling it again."
+            "value": "On by default. Frequent uploads can trip site protection, so after 3 consecutive failures — including a Cloudflare challenge — Dexo turns this off automatically. Clearing the challenge from ReadBoost turns it back on."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "linux.do 阅读时间上报默认关闭，开启后可能触发站点防护。连续失败 3 次（包括 Cloudflare 验证/撞盾）后会自动关闭；请完成验证后再手动开启。"
+            "value": "默认开启。频繁上报可能触发站点防护，连续失败 3 次（包括 Cloudflare 验证/撞盾）后会自动关闭；在已读加速中过盾后会自动恢复。"
           }
         }
       }
@@ -6109,6 +6109,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "向 linux.do 上报阅读时间"
+          }
+        }
+      }
+    },
+    "settings.read_timings.reenable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn back on"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新开启"
           }
         }
       }

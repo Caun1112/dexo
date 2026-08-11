@@ -239,16 +239,19 @@ final class ReadTopicMergerTests: XCTestCase {
 }
 
 final class TopicTimingPolicyTests: XCTestCase {
-    func testLinuxDoDefaultsOffAndManualReenableAdvancesGeneration() throws {
+    func testLinuxDoDefaultsOnAndManualReenableAdvancesGeneration() throws {
         let suiteName = "dexo-topic-timing-tests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let settings = AppSettings(testingDefaults: defaults)
 
-        XCTAssertFalse(settings.linuxDoReadTimingsEnabled)
+        XCTAssertTrue(settings.linuxDoReadTimingsEnabled, "reporting now ships enabled")
         XCTAssertEqual(settings.linuxDoReadTimingsActivationGeneration, 0)
+        // Already on: re-asserting the same value must not bump the generation.
         settings.linuxDoReadTimingsEnabled = true
-        XCTAssertEqual(settings.linuxDoReadTimingsActivationGeneration, 1)
+        XCTAssertEqual(settings.linuxDoReadTimingsActivationGeneration, 0)
+        // Only an off→on transition resets the circuit breaker.
+        settings.linuxDoReadTimingsEnabled = false
         settings.linuxDoReadTimingsEnabled = true
         XCTAssertEqual(settings.linuxDoReadTimingsActivationGeneration, 1)
         settings.linuxDoReadTimingsEnabled = false

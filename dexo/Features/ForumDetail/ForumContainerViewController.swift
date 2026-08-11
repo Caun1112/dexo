@@ -158,7 +158,15 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
             message: String(localized: "settings.read_timings.auto_disabled.message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
+        // Offer the fix inline. Sending the user to Settings for a switch they
+        // just had flipped off for them is needless friction.
+        alert.addAction(UIAlertAction(
+            title: String(localized: "settings.read_timings.reenable"),
+            style: .default
+        ) { _ in
+            AppSettings.shared.linuxDoReadTimingsEnabled = true
+        })
+        alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .cancel))
         present(alert, animated: true)
     }
 

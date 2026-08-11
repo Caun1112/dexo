@@ -312,12 +312,16 @@ final class AppSettings {
 
     // MARK: - Read Tracking
 
-    /// linux.do timing uploads are deliberately opt-in. `bool(forKey:)`
-    /// defaults to false, preserving the app's historical behavior.
+    /// linux.do timing uploads default to on. They stay a toggle because
+    /// repeated POSTs can trip site-side anti-bot protection — after three
+    /// consecutive failures the app switches this off on its own.
     var linuxDoReadTimingsEnabled: Bool {
-        get { defaults.bool(forKey: "linuxDoReadTimingsEnabled") }
+        get {
+            if defaults.object(forKey: "linuxDoReadTimingsEnabled") == nil { return true }
+            return defaults.bool(forKey: "linuxDoReadTimingsEnabled")
+        }
         set {
-            let wasEnabled = defaults.bool(forKey: "linuxDoReadTimingsEnabled")
+            let wasEnabled = linuxDoReadTimingsEnabled
             defaults.set(newValue, forKey: "linuxDoReadTimingsEnabled")
             if newValue, !wasEnabled {
                 defaults.set(
