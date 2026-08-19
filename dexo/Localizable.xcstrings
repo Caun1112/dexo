@@ -2071,6 +2071,22 @@
         }
       }
     },
+    "home.filter.add_categories": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Other Categories"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加其他板块"
+          }
+        }
+      }
+    },
     "home.filter.all_categories": {
       "localizations": {
         "en": {
@@ -2083,6 +2099,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "全部分类"
+          }
+        }
+      }
+    },
+    "home.filter.remove_categories": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove Categories"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除板块"
           }
         }
       }
@@ -3925,6 +3957,22 @@
         }
       }
     },
+    "readboost.action.challenge_retry": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pass Challenge and Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "过盾并重试"
+          }
+        }
+      }
+    },
     "readboost.action.reset": {
       "localizations": {
         "en": {
@@ -4506,13 +4554,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Read-time reporting is off for this forum. Turn on \"Report read time to linux.do\" under Settings › Read Tracking."
+            "value": "Read-time reporting will be restored automatically when ReadBoost starts. No Settings change is needed."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "该论坛的阅读上报已关闭。请到「设置 › 阅读上报」中打开「向 linux.do 上报阅读时间」。"
+            "value": "启动已读加速时会自动恢复阅读上报，无需前往设置修改。"
           }
         }
       }
@@ -6053,13 +6101,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dexo stopped linux.do read-time reporting after 3 consecutive failures. Clear the site verification first, then turn it back on."
+            "value": "Read-time reporting paused for this session after 3 consecutive failures. Pass the site challenge to resume; ReadBoost remains available without changing Settings."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "linux.do 阅读时间上报已连续失败 3 次，Dexo 已自动关闭。请先完成站点验证，再重新开启。"
+            "value": "linux.do 阅读时间上报连续失败 3 次，已在本次会话中暂停。完成站点验证后会自动恢复；已读加速无需再到设置中开启。"
           }
         }
       }
@@ -6069,13 +6117,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Read-time reporting stopped"
+            "value": "Read-time reporting paused"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "阅读时间上报已停止"
+            "value": "阅读时间上报已暂停"
           }
         }
       }
@@ -6086,13 +6134,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "On by default. Frequent uploads can trip site protection, so after 3 consecutive failures — including a Cloudflare challenge — Dexo turns this off automatically. Clearing the challenge from ReadBoost turns it back on."
+            "value": "On by default. After 3 consecutive failures, Dexo pauses uploads for this session and asks you to pass the challenge. ReadBoost can recover and retry without changing this setting."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "默认开启。频繁上报可能触发站点防护，连续失败 3 次（包括 Cloudflare 验证/撞盾）后会自动关闭；在已读加速中过盾后会自动恢复。"
+            "value": "默认开启。连续失败 3 次后，Dexo 仅暂停本次会话的上报并提示过盾；已读加速可直接恢复并重试，无需修改此设置。"
           }
         }
       }
@@ -6118,13 +6166,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Turn back on"
+            "value": "Pass challenge and resume"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "重新开启"
+            "value": "过盾并恢复"
           }
         }
       }

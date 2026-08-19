@@ -158,13 +158,18 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
             message: String(localized: "settings.read_timings.auto_disabled.message"),
             preferredStyle: .alert
         )
-        // Offer the fix inline. Sending the user to Settings for a switch they
-        // just had flipped off for them is needless friction.
+        // 直接在提示中提供过盾恢复，不再要求用户进入设置切换开关。
         alert.addAction(UIAlertAction(
             title: String(localized: "settings.read_timings.reenable"),
             style: .default
-        ) { _ in
-            AppSettings.shared.linuxDoReadTimingsEnabled = true
+        ) { [weak self, weak alert] _ in
+            // 提示框完全收起后再展示过盾页，避免两个模态转场互相抢占。
+            alert?.dismiss(animated: true) { [weak self] in
+                guard let self else { return }
+                ChallengeViewController.present(from: self) { [weak self] in
+                    self?.api.resumeTopicTimingsAfterChallenge()
+                }
+            }
         })
         alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .cancel))
         present(alert, animated: true)

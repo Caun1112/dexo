@@ -38,7 +38,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
-            CURRENT_PROJECT_VERSION=${{ steps.buildnumber.outputs.build }} | xcpretty
+            CURRENT_PROJECT_VERSION=${{ steps.buildnumber.outputs.build }}
 
       - name: Package IPA
         run: |
@@ -54,16 +54,17 @@ jobs:
           if-no-files-found: error
 
       - name: Read version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: version
         run: |
           VERSION=$(awk -F'"' '/"MARKETING_VERSION":/ { print $4; exit }' Project.swift)
           test -n "$VERSION"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      # Tag + Release only for main. A manual run on a feature branch stops at
-      # the artifact above so test builds don't pollute the release history.
+      # 手动运行只上传构建产物；仅 main 的既有 push 触发条件
+      # （上方限定 TestFlight/**）会创建标签和 Release。
       - name: Create tag and Release
-        if: github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

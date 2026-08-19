@@ -239,6 +239,20 @@ final class ReadTopicMergerTests: XCTestCase {
 }
 
 final class TopicTimingPolicyTests: XCTestCase {
+    func testMigrationReenablesPersistedFalseOnlyOnce() throws {
+        let suiteName = "dexo-topic-timing-migration-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(false, forKey: "linuxDoReadTimingsEnabled")
+
+        let migrated = AppSettings(testingDefaults: defaults)
+        XCTAssertTrue(migrated.linuxDoReadTimingsEnabled)
+
+        migrated.linuxDoReadTimingsEnabled = false
+        let reloaded = AppSettings(testingDefaults: defaults)
+        XCTAssertFalse(reloaded.linuxDoReadTimingsEnabled)
+    }
+
     func testLinuxDoDefaultsOnAndManualReenableAdvancesGeneration() throws {
         let suiteName = "dexo-topic-timing-tests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -282,6 +296,52 @@ final class TopicTimingPolicyTests: XCTestCase {
             XCTAssertEqual(assessment.outcome, .cloudflareChallenge)
             XCTAssertEqual(assessment.statusCode, statusCode)
         }
+    }
+
+    func testReadBoostTreatsLinuxDoEmptyAndNonJSON403AsChallenge() {
+        for data in [nil, Data(), Data("<html>Forbidden</html>".utf8)] as [Data?] {
+            XCTAssertTrue(
+                readBoostNeedsChallenge(
+                    baseURL: "https://linux.do",
+                    statusCode: 403,
+                    data: data
+                )
+            )
+        }
+    }
+
+    func testReadBoostDoesNotMistakeDiscourseJSON403ForChallenge() {
+        let responses = [
+            #"{"errors":["You are not permitted"],"error_type":"invalid_access"}"#,
+            "{}",
+            #"{"message":"__cf_chl_ is plain JSON here"}"#,
+        ]
+        for response in responses {
+            XCTAssertFalse(
+                readBoostNeedsChallenge(
+                    baseURL: "https://linux.do",
+                    statusCode: 403,
+                    data: Data(response.utf8)
+                )
+            )
+        }
+    }
+
+    func testReadBoost403FallbackIsLinuxDoOnly() {
+        XCTAssertFalse(
+            readBoostNeedsChallenge(
+                baseURL: "https://example.com",
+                statusCode: 403,
+                data: nil
+            )
+        )
+        XCTAssertTrue(
+            readBoostNeedsChallenge(
+                baseURL: "https://linux.do",
+                statusCode: 200,
+                data: Data("<html><script>__cf_chl_</script></html>".utf8)
+            )
+        )
     }
 
     func testSuccessAndOrdinaryFailureClassification() {

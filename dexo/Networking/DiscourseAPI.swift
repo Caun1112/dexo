@@ -66,6 +66,17 @@ func assessTopicTimingResponse(
     )
 }
 
+/// 判断一次已读加速上报是否需要用户处理 linux.do 的站点验证。
+func readBoostNeedsChallenge(baseURL: String, statusCode: Int?, data: Data?) -> Bool {
+    if ForumPolicy.isLinuxDoFamily(baseURL: baseURL), statusCode == 403 {
+        guard let data, !data.isEmpty else { return true }
+
+        // 任何合法 JSON 都视为论坛真实 API 响应，不能误导用户去过盾。
+        return (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)) == nil
+    }
+    return isCloudflareChallengeResponse(data)
+}
+
 /// Normalizes both shapes returned by Discourse's category list endpoint:
 /// nested `subcategory_list` responses and lazy-load responses where roots and
 /// a small child preview are mixed in one flat array. Root order always follows
@@ -934,8 +945,6 @@ final class DiscourseAPI {
                 errorSummary: summary
             )
             if trippedBreaker, ForumPolicy.isLinuxDoFamily(baseURL: baseURL) {
-                AppSettings.shared.linuxDoReadTimingsEnabled = false
-                lastTopicTimingsReportingEnabled = false
                 NotificationCenter.default.post(
                     name: .linuxDoReadTimingsAutoDisabled,
                     object: self
@@ -991,7 +1000,11 @@ final class DiscourseAPI {
             data: response.data,
             errorDescription: response.error?.localizedDescription
         )
-        let needsChallenge = assessment.outcome == .cloudflareChallenge
+        let needsChallenge = readBoostNeedsChallenge(
+            baseURL: baseURL,
+            statusCode: assessment.statusCode,
+            data: response.data
+        )
         debugLog("[DiscourseAPI] readboost timings topic=\(topicId) posts=\(timings.count) status=\(assessment.statusCode ?? 0) challenge=\(needsChallenge)")
         return ReadBoostUploadResult(statusCode: assessment.statusCode, needsChallenge: needsChallenge)
     }
@@ -999,6 +1012,16 @@ final class DiscourseAPI {
     private var topicTimingsCircuitBreaker = TopicTimingCircuitBreaker()
     private var lastTopicTimingsReportingEnabled: Bool?
     private var lastTopicTimingsActivationGeneration: Int?
+
+    /// 过盾完成后恢复当前 API 实例的被动阅读上报，不再依赖持久化开关触发重置。
+    func resumeTopicTimingsAfterChallenge() {
+        if ForumPolicy.isLinuxDoFamily(baseURL: baseURL) {
+            AppSettings.shared.linuxDoReadTimingsEnabled = true
+        }
+        topicTimingsCircuitBreaker.reset()
+        lastTopicTimingsReportingEnabled = ForumPolicy.tracksReadTimings(baseURL: baseURL)
+        lastTopicTimingsActivationGeneration = AppSettings.shared.linuxDoReadTimingsActivationGeneration
+    }
 
     private func persistTopicTimingReport(
         topicId: Int,
@@ -1412,6 +1435,19 @@ private final class DiscourseAuthInterceptor: RequestInterceptor {
                 if request.value(forHTTPHeaderField: "User-Api-Key") == nil {
                     request.setValue(userApiKey, forHTTPHeaderField: "User-Api-Key")
                 }
+                // User API Key 登录仍需要携带过盾产生的同源 CF Cookie；不能混入网页登录 _t。
+                if ForumPolicy.isLinuxDoFamily(baseURL: baseURL),
+                   let url = request.url,
+                   isSameOriginAsBaseURL(url)
+                {
+                    let cloudflareCookies = WebCookieStore.shared.cloudflareCookieHeader(for: url)
+                    if !cloudflareCookies.isEmpty {
+                        request.setValue(cloudflareCookies, forHTTPHeaderField: "Cookie")
+                        if let userAgent = WebCookieStore.shared.userAgent {
+                            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+                        }
+                    }
+                }
             }
         }
         if request.value(forHTTPHeaderField: "Accept") == nil {
@@ -1421,6 +1457,22 @@ private final class DiscourseAuthInterceptor: RequestInterceptor {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         completion(.success(request))
+    }
+
+    private func isSameOriginAsBaseURL(_ url: URL) -> Bool {
+        guard let base = URL(string: baseURL) else { return false }
+        return url.scheme?.lowercased() == base.scheme?.lowercased()
+            && url.host?.lowercased() == base.host?.lowercased()
+            && effectivePort(of: url) == effectivePort(of: base)
+    }
+
+    private func effectivePort(of url: URL) -> Int? {
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "https": return 443
+        case "http": return 80
+        default: return nil
+        }
     }
 
     func retry(_ request: Request, for session: Session, dueTo error: any Error, completion: @escaping (RetryResult) -> Void) {

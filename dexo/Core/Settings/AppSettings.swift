@@ -6,14 +6,27 @@ import Perception
 final class AppSettings {
     static let shared = AppSettings()
 
+    private static let readTimingsDefaultMigrationVersion = 1
     private let defaults: UserDefaults
 
     private init() {
         defaults = .standard
+        migrateReadTimingsDefaultIfNeeded()
     }
 
     init(testingDefaults defaults: UserDefaults) {
         self.defaults = defaults
+        migrateReadTimingsDefaultIfNeeded()
+    }
+
+    /// 旧版本的熔断器会持久化关闭开关；本次只恢复一次，之后仍尊重用户的主动选择。
+    private func migrateReadTimingsDefaultIfNeeded() {
+        let versionKey = "linuxDoReadTimingsDefaultMigrationVersion"
+        guard defaults.integer(forKey: versionKey) < Self.readTimingsDefaultMigrationVersion else {
+            return
+        }
+        defaults.set(true, forKey: "linuxDoReadTimingsEnabled")
+        defaults.set(Self.readTimingsDefaultMigrationVersion, forKey: versionKey)
     }
 
     // MARK: - Appearance
@@ -200,6 +213,40 @@ final class AppSettings {
             if result.count == maximumLocalBlockedUsers { break }
         }
         return result
+    }
+
+    // MARK: - 首页板块偏好
+
+    /// 首页常用板块按论坛保存；返回 `nil` 表示该论坛尚未建立偏好，空数组则是用户明确移除了全部常用板块。
+    func homeCategoryIDs(for baseURL: String) -> [Int]? {
+        let forum = Self.normalizedForumBaseURL(baseURL)
+        guard let ids = homeCategoryIDsByForum[forum] else { return nil }
+        return Self.deduplicatedCategoryIDs(ids)
+    }
+
+    func setHomeCategoryIDs(_ categoryIDs: [Int], for baseURL: String) {
+        let forum = Self.normalizedForumBaseURL(baseURL)
+        var preferences = homeCategoryIDsByForum
+        preferences[forum] = Self.deduplicatedCategoryIDs(categoryIDs)
+        homeCategoryIDsByForum = preferences
+    }
+
+    private var homeCategoryIDsByForum: [String: [Int]] {
+        get {
+            guard let data = defaults.data(forKey: "homeCategoryIDsByForum"),
+                  let preferences = try? JSONDecoder().decode([String: [Int]].self, from: data)
+            else { return [:] }
+            return preferences
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: "homeCategoryIDsByForum")
+        }
+    }
+
+    private static func deduplicatedCategoryIDs(_ categoryIDs: [Int]) -> [Int] {
+        var seen = Set<Int>()
+        return categoryIDs.filter { seen.insert($0).inserted }
     }
 
     // MARK: - Theme

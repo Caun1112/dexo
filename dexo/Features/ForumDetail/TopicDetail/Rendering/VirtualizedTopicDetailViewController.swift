@@ -1502,6 +1502,7 @@ final class VirtualizedTopicDetailViewController: ObservableViewController, UIGe
             presenter = next
         }
         ChallengeViewController.present(from: presenter) {
+            self.api.resumeTopicTimingsAfterChallenge()
             ReadBoostManager.shared.challengeDidResolve()
         }
     }

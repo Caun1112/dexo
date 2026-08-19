@@ -78,7 +78,9 @@ final class ReadBoostSheetViewController: ObservableViewController {
         _ = manager.message
         _ = manager.status
         _ = manager.processedEnd
+        _ = manager.failedStatusCode
         _ = manager.config
+        _ = AppSettings.shared.linuxDoReadTimingsEnabled
         rebuildSections()
     }
 
@@ -157,9 +159,25 @@ final class ReadBoostSheetViewController: ObservableViewController {
         }
     }
 
-    private enum ActionRow: Int, CaseIterable {
+    private enum ActionRow {
         case runToggle
+        case challengeRetry
         case reset
+    }
+
+    private var actionRows: [ActionRow] {
+        var rows: [ActionRow] = [.runToggle]
+        if showsChallengeRetry { rows.append(.challengeRetry) }
+        rows.append(.reset)
+        return rows
+    }
+
+    private var showsChallengeRetry: Bool {
+        guard api.isLinuxDo, !manager.isRunning else { return false }
+        if !AppSettings.shared.linuxDoReadTimingsEnabled { return true }
+        return manager.status == .failed
+            && manager.failedStatusCode == 403
+            && manager.topicId == topicId
     }
 
     // MARK: - Actions
@@ -174,6 +192,20 @@ final class ReadBoostSheetViewController: ObservableViewController {
                 topicId: topicId,
                 currentPosition: currentPosition,
                 totalReplies: totalReplies
+            )
+        }
+    }
+
+    private func challengeAndRetry() {
+        view.endEditing(true)
+        ChallengeViewController.present(from: self) { [weak self] in
+            guard let self else { return }
+            self.api.resumeTopicTimingsAfterChallenge()
+            self.manager.retryAfterChallenge(
+                api: self.api,
+                topicId: self.topicId,
+                currentPosition: self.currentPosition,
+                totalReplies: self.totalReplies
             )
         }
     }
@@ -212,7 +244,7 @@ extension ReadBoostSheetViewController: UITableViewDataSource, UITableViewDelega
         case .risk: return 2
         case .options: return OptionRow.allCases.count
         case .advanced: return AdvancedRow.allCases.count
-        case .actions: return ActionRow.allCases.count
+        case .actions: return actionRows.count
         }
     }
 
@@ -248,7 +280,7 @@ extension ReadBoostSheetViewController: UITableViewDataSource, UITableViewDelega
         case .advanced:
             return advancedCell(tableView, for: AdvancedRow(rawValue: indexPath.row) ?? .baseDelay)
         case .actions:
-            return actionCell(for: ActionRow(rawValue: indexPath.row) ?? .runToggle)
+            return actionCell(for: actionRows[indexPath.row])
         }
     }
 
@@ -344,6 +376,9 @@ extension ReadBoostSheetViewController: UITableViewDataSource, UITableViewDelega
                 ? String(localized: "readboost.action.stop")
                 : String(localized: "readboost.action.start")
             cell.textLabel?.textColor = manager.isRunning ? .systemRed : themeManager.accentColor
+        case .challengeRetry:
+            cell.textLabel?.text = String(localized: "readboost.action.challenge_retry")
+            cell.textLabel?.textColor = themeManager.accentColor
         case .reset:
             cell.textLabel?.text = String(localized: "readboost.action.reset")
             cell.textLabel?.textColor = manager.isRunning ? .tertiaryLabel : .label
@@ -358,10 +393,10 @@ extension ReadBoostSheetViewController: UITableViewDataSource, UITableViewDelega
         case .risk where indexPath.row == 1:
             manager.acceptRisk()
         case .actions:
-            switch ActionRow(rawValue: indexPath.row) {
+            switch actionRows[indexPath.row] {
             case .runToggle: toggleRun()
+            case .challengeRetry: challengeAndRetry()
             case .reset: manager.resetConfig()
-            case .none: break
             }
         default:
             break

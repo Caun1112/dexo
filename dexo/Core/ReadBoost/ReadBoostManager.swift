@@ -76,12 +76,12 @@ final class ReadBoostManager {
     /// Highest post number confirmed uploaded in this run.
     private(set) var processedEnd: Int = 0
     private(set) var errorDescription: String?
+    private(set) var failedStatusCode: Int?
 
     private var runTask: Task<Void, Never>?
     private var shouldStop = false
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
-    /// Set when the user finishes (or dismisses) the challenge page, so a
-    /// paused run picks up immediately instead of waiting out the timeout.
+    /// 用户确认过盾完成后置位，让暂停任务立即继续而不必等满超时时间。
     private var challengeCleared = false
 
     private init(defaults: UserDefaults = .standard) {
@@ -175,10 +175,54 @@ final class ReadBoostManager {
     /// - Parameter currentPosition: floor the reader is on, used when
     ///   `config.startFromCurrent` is set.
     func start(api: DiscourseAPI, topicId: Int, currentPosition: Int, totalReplies: Int) {
+        startRun(
+            api: api,
+            topicId: topicId,
+            currentPosition: currentPosition,
+            totalReplies: totalReplies,
+            resumePosition: nil
+        )
+    }
+
+    /// 用户完成过盾后，从上一次成功批次的下一层继续，而不是重新从头处理。
+    func retryAfterChallenge(
+        api: DiscourseAPI,
+        topicId: Int,
+        currentPosition: Int,
+        totalReplies: Int
+    ) {
+        let resumePosition: Int?
+        if status == .failed, self.topicId == topicId {
+            resumePosition = min(max(processedEnd + 1, 1), totalReplies)
+        } else {
+            resumePosition = nil
+        }
+        startRun(
+            api: api,
+            topicId: topicId,
+            currentPosition: currentPosition,
+            totalReplies: totalReplies,
+            resumePosition: resumePosition
+        )
+    }
+
+    private func startRun(
+        api: DiscourseAPI,
+        topicId: Int,
+        currentPosition: Int,
+        totalReplies: Int,
+        resumePosition: Int?
+    ) {
         guard !isRunning else {
             message = String(localized: "readboost.status.already_running")
             return
         }
+
+        // 已读加速是用户主动触发的上报；即使被动上报此前被暂停，也应直接恢复。
+        if ForumPolicy.isLinuxDoFamily(baseURL: api.baseURL) {
+            AppSettings.shared.linuxDoReadTimingsEnabled = true
+        }
+
         guard config.hasAgreed else {
             fail(with: String(localized: "readboost.status.needs_consent"))
             return
@@ -191,15 +235,11 @@ final class ReadBoostManager {
             fail(with: String(localized: "readboost.status.login_required"))
             return
         }
-        guard ForumPolicy.tracksReadTimings(baseURL: api.baseURL) else {
-            fail(with: String(localized: "readboost.status.timings_disabled"))
-            return
-        }
 
         let config = config.normalized()
-        let startPosition = config.startFromCurrent
+        let startPosition = resumePosition ?? (config.startFromCurrent
             ? min(max(currentPosition, 1), totalReplies)
-            : 1
+            : 1)
 
         shouldStop = false
         status = .running
@@ -208,6 +248,7 @@ final class ReadBoostManager {
         self.totalReplies = totalReplies
         processedEnd = startPosition - 1
         errorDescription = nil
+        failedStatusCode = nil
         beginBackgroundTask()
 
         runTask = Task { [weak self] in
@@ -254,6 +295,7 @@ final class ReadBoostManager {
                 finish(status: .idle, message: String(localized: "readboost.status.stopped"))
                 return
             case .failed(let statusCode):
+                failedStatusCode = statusCode
                 errorDescription = statusCode.map { String(localized: "readboost.error.http \($0)") }
                 finish(status: .failed, message: String(localized: "readboost.status.failed"))
                 return
@@ -348,12 +390,7 @@ final class ReadBoostManager {
         }
     }
 
-    /// Called by the UI once the challenge page closes, so the paused batch
-    /// retries right away rather than sitting out the remaining wait.
-    ///
-    /// Clearing the challenge also restores linux.do read-time reporting: a
-    /// Cloudflare interception is exactly what trips the auto-shutdown, and
-    /// making the user go re-arm a switch they never touched is pure friction.
+    /// 用户确认过盾完成后立即恢复暂停批次，并同时恢复 linux.do 被动阅读上报。
     func challengeDidResolve() {
         AppSettings.shared.linuxDoReadTimingsEnabled = true
         guard status == .awaitingChallenge else { return }
@@ -390,6 +427,8 @@ final class ReadBoostManager {
     private func fail(with message: String) {
         status = .failed
         self.message = message
+        failedStatusCode = nil
+        errorDescription = nil
     }
 
     private func finish(status: ReadBoostStatus, message: String) {

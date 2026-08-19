@@ -6,6 +6,16 @@ import WebKit
 final class WebCookieStore {
     static let shared = WebCookieStore()
 
+    private static let cloudflareCookieNames: Set<String> = [
+        "cf_clearance",
+        "__cf_bm",
+        "__cflb",
+        "__cfseq",
+        "_cfuvid",
+        "cf_ob_info",
+        "cf_use_ob",
+    ]
+
     private var jar: [String: HTTPCookie] = [:]
     private let lock = NSLock()
     private let filePath: URL
@@ -59,6 +69,24 @@ final class WebCookieStore {
 
     func cookieHeader(for url: URL) -> String {
         cookies(for: url).map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+    }
+
+    /// 仅返回站点验证所需的 Cloudflare Cookie，避免 API Key 请求带上网页登录 `_t`。
+    func cloudflareCookieHeader(for url: URL) -> String {
+        Self.cloudflareCookieHeader(from: cookies(for: url))
+    }
+
+    static func cloudflareCookieHeader(from cookies: [HTTPCookie]) -> String {
+        cookies
+            .filter { isCloudflareCookieName($0.name) }
+            .sorted { $0.name < $1.name }
+            .map { "\($0.name)=\($0.value)" }
+            .joined(separator: "; ")
+    }
+
+    static func isCloudflareCookieName(_ name: String) -> Bool {
+        let normalized = name.lowercased()
+        return cloudflareCookieNames.contains(normalized) || normalized.hasPrefix("cf_chl_")
     }
 
     func mergeResponseHeaders(_ headers: [AnyHashable: Any], for url: URL) {

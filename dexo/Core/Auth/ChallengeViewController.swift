@@ -59,14 +59,16 @@ final class ChallengeViewController: BaseViewController {
     private let targetURL: URL
     private let userAgent: String?
 
-    /// Invoked once, after the page closes and cookies have been synced.
-    var onDismiss: (() -> Void)?
+    /// 用户确认完成、Cookie 与 UA 同步完毕且页面消失后调用一次。
+    var onResolved: (() -> Void)?
 
     private var webView: WKWebView?
     private var proxyLease: AnyObject?
     private var setupTask: Task<Void, Never>?
+    private var cookieSyncTask: Task<Void, Never>?
     private var isFinalCookieSyncInProgress = false
     private var isObservingCookieChanges = false
+    private var shouldNotifyResolved = false
 
     private func makeWebViewConfiguration() async throws -> (WKWebViewConfiguration, AnyObject?) {
         let config = WKWebViewConfiguration()
@@ -196,8 +198,11 @@ final class ChallengeViewController: BaseViewController {
     }
 
     private func syncCookies() {
-        Task { @MainActor in
-            await syncWebSession()
+        guard !isFinalCookieSyncInProgress else { return }
+        let previousTask = cookieSyncTask
+        cookieSyncTask = Task { @MainActor [weak self] in
+            _ = await previousTask?.value
+            await self?.syncWebSession()
         }
     }
 
@@ -222,30 +227,23 @@ final class ChallengeViewController: BaseViewController {
 
     @objc private func cancelTapped() {
         setupTask?.cancel()
-        syncAndDismiss()
+        syncAndDismiss(resolved: false)
     }
 
     @objc private func doneTapped() {
-        syncAndDismiss()
+        syncAndDismiss(resolved: true)
     }
 
-    private func syncAndDismiss() {
+    private func syncAndDismiss(resolved: Bool) {
         guard !isFinalCookieSyncInProgress else { return }
         isFinalCookieSyncInProgress = true
-        Task { @MainActor in
+        let pendingSyncTask = cookieSyncTask
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            _ = await pendingSyncTask?.value
             await syncWebSession()
+            shouldNotifyResolved = resolved
             dismiss(animated: true)
-        }
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        // Also cover an interactive sheet dismissal. Keep a strong Task
-        // capture until WebKit has returned its latest cookie snapshot.
-        if !isFinalCookieSyncInProgress,
-           isBeingDismissed || navigationController?.isBeingDismissed == true
-        {
-            syncCookies()
         }
     }
 
@@ -255,21 +253,20 @@ final class ChallengeViewController: BaseViewController {
             webView?.configuration.websiteDataStore.httpCookieStore.remove(coordinator)
             isObservingCookieChanges = false
         }
-        if view.window == nil, let onDismiss {
-            self.onDismiss = nil
-            onDismiss()
-        }
+        guard view.window == nil else { return }
+        let resolved = shouldNotifyResolved ? onResolved : nil
+        onResolved = nil
+        resolved?()
     }
 
-    /// Convenience for presenting the challenge flow from any view controller.
-    /// `onDismiss` fires once the page closes — the refreshed cookies are
-    /// already synced by then, so callers can retry their request immediately.
-    static func present(from presenter: UIViewController, onDismiss: (() -> Void)? = nil) {
+    /// 展示过盾页；只有用户点击完成并完成最终同步后才调用 `onResolved`。
+    static func present(from presenter: UIViewController, onResolved: (() -> Void)? = nil) {
         guard let url = URL(string: "https://linux.do/challenge") else { return }
         let vc = ChallengeViewController(targetURL: url, userAgent: WebCookieStore.shared.userAgent)
-        vc.onDismiss = onDismiss
+        vc.onResolved = onResolved
         let nav = UINavigationController(rootViewController: vc)
         nav.modalPresentationStyle = .pageSheet
+        nav.isModalInPresentation = true
         presenter.present(nav, animated: true)
     }
 

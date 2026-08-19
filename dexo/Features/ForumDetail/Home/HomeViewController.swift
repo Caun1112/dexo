@@ -6,14 +6,7 @@ final class HomeViewController: ObservableViewController {
     private weak var authGate: AuthGating?
     private var locallyReadTopicIDs: Set<Int> = []
 
-    private lazy var sortBarButton: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "arrow.up.arrow.down"),
-            menu: nil
-        )
-        item.accessibilityLabel = String(localized: "home.sort.accessibility.label")
-        return item
-    }()
+    private static let linuxDoDefaultCategoryNames = ["前沿快讯", "积分乐园", "跳蚤市场"]
 
     /// Right bar button items injected by the container (e.g. minimize button), captured before we add our own.
     private var inheritedRightBarItems: [UIBarButtonItem] = []
@@ -131,6 +124,9 @@ final class HomeViewController: ObservableViewController {
     private let categoryFloatingButtonSize: CGFloat = 46
     /// Gap between the compose FAB and the filter button stacked above it.
     private let categoryFloatingButtonSpacing: CGFloat = 12
+    private let sortFloatingBarHeight: CGFloat = 44
+    private let sortFloatingBarSpacing: CGFloat = 8
+    private let sortFloatingBarWidth: CGFloat = 176
 
     private lazy var categoryFloatingButton: UIButton = {
         let button = UIButton(type: .system)
@@ -150,6 +146,52 @@ final class HomeViewController: ObservableViewController {
         button.accessibilityLabel = String(localized: "home.filter.accessibility.label")
         button.accessibilityHint = String(localized: "home.filter.accessibility.hint")
         return button
+    }()
+
+    private lazy var sortFloatingItems: [(mode: TopicFeedMode, button: UIButton)] = [
+        (.activity, makeSortFloatingButton(
+            mode: .activity,
+            title: String(localized: "home.activity"),
+            symbol: "clock.arrow.circlepath"
+        )),
+        (.created, makeSortFloatingButton(
+            mode: .created,
+            title: String(localized: "home.created"),
+            symbol: "calendar"
+        )),
+        (.hot, makeSortFloatingButton(
+            mode: .hot,
+            title: String(localized: "home.hot"),
+            symbol: "flame"
+        )),
+        (.top, makeSortFloatingButton(
+            mode: .top,
+            title: String(localized: "home.top"),
+            symbol: "chart.bar"
+        )),
+    ]
+
+    private lazy var sortFloatingBar: UIView = {
+        let bar = UIView()
+        bar.layer.cornerRadius = sortFloatingBarHeight / 2
+        bar.layer.shadowColor = UIColor.black.cgColor
+        bar.layer.shadowOpacity = 0.2
+        bar.layer.shadowOffset = CGSize(width: 0, height: 2)
+        bar.layer.shadowRadius = 4
+        bar.isAccessibilityElement = false
+
+        let stack = UIStackView(arrangedSubviews: sortFloatingItems.map(\.button))
+        stack.axis = .horizontal
+        stack.distribution = .fillEqually
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: bar.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+        ])
+        return bar
     }()
 
     private lazy var composeButton: UIButton = {
@@ -276,7 +318,7 @@ final class HomeViewController: ObservableViewController {
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(customView: categoryButton)
         inheritedRightBarItems = navigationItem.rightBarButtonItems ?? []
-        navigationItem.rightBarButtonItems = inheritedRightBarItems + [Self.makeRightBarSpacer(), sortBarButton]
+        navigationItem.rightBarButtonItems = inheritedRightBarItems
 
         view.addSubview(composeButton)
         composeButton.frame = CGRect(x: 0, y: 0, width: composeButtonSize, height: composeButtonSize)
@@ -286,6 +328,13 @@ final class HomeViewController: ObservableViewController {
             y: 0,
             width: categoryFloatingButtonSize,
             height: categoryFloatingButtonSize
+        )
+        view.addSubview(sortFloatingBar)
+        sortFloatingBar.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: sortFloatingBarWidth,
+            height: sortFloatingBarHeight
         )
 
         Task {
@@ -321,6 +370,8 @@ final class HomeViewController: ObservableViewController {
             errorLabel.isHidden = false
             loginButton.isHidden = false
             tableView.isHidden = true
+            sortFloatingBar.isHidden = true
+            categoryFloatingButton.isHidden = true
             navigationItem.rightBarButtonItems = inheritedRightBarItems
             activityIndicator.stopAnimating()
             return
@@ -328,14 +379,15 @@ final class HomeViewController: ObservableViewController {
 
         loginButton.isHidden = true
         tableView.isHidden = false
-        navigationItem.rightBarButtonItems = inheritedRightBarItems + [Self.makeRightBarSpacer(), sortBarButton]
+        sortFloatingBar.isHidden = false
+        categoryFloatingButton.isHidden = false
+        navigationItem.rightBarButtonItems = inheritedRightBarItems
         composeButton.backgroundColor = ThemeManager.shared.accentColor
-        let categoryMenu = UIMenu(title: "", children: buildCategoryMenuElements())
-        categoryButton.menu = categoryMenu
-        categoryFloatingButton.menu = categoryMenu
+        updateCategoryMenus()
         categoryFloatingButton.backgroundColor = ThemeManager.shared.cardBackgroundColor
         categoryFloatingButton.tintColor = ThemeManager.shared.accentColor
-        sortBarButton.menu = buildSortMenu()
+        sortFloatingBar.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        updateSortFloatingButtons()
         updateCategoryButton()
         // Show non-login errors (e.g. rate limit) when topic list is empty
         if let error = viewModel.errorMessage, viewModel.topics.isEmpty {
@@ -389,25 +441,44 @@ final class HomeViewController: ObservableViewController {
         }
     }
 
-    private func buildSortMenu() -> UIMenu {
-        let modes: [(TopicFeedMode, String, String)] = [
-            (.activity, String(localized: "home.activity"), "clock.arrow.circlepath"),
-            (.created, String(localized: "home.created"), "calendar"),
-            (.hot, String(localized: "home.hot"), "flame"),
-            (.top, String(localized: "home.top"), "chart.bar"),
-        ]
-        let actions = modes.map { mode, title, symbol -> UIAction in
-            let state: UIMenuElement.State = viewModel.feedMode == mode ? .on : .off
-            return UIAction(title: title, image: UIImage(systemName: symbol), state: state) { [weak self] _ in
-                self?.selectFeedMode(mode)
-            }
+    private func makeSortFloatingButton(
+        mode: TopicFeedMode,
+        title: String,
+        symbol: String
+    ) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(
+            UIImage(
+                systemName: symbol,
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            ),
+            for: .normal
+        )
+        button.layer.cornerRadius = 10
+        button.accessibilityLabel = title
+        button.accessibilityIdentifier = "home.sort.\(mode.rawValue)"
+        button.addAction(UIAction { [weak self] _ in
+            self?.selectFeedMode(mode)
+        }, for: .touchUpInside)
+        return button
+    }
+
+    private func updateSortFloatingButtons() {
+        let accentColor = ThemeManager.shared.accentColor
+        for item in sortFloatingItems {
+            let isSelected = item.mode == viewModel.feedMode
+            item.button.isSelected = isSelected
+            item.button.tintColor = isSelected ? accentColor : .secondaryLabel
+            item.button.backgroundColor = isSelected
+                ? accentColor.withAlphaComponent(0.16)
+                : .clear
+            item.button.accessibilityTraits = isSelected ? [.button, .selected] : .button
         }
-        return UIMenu(title: "", children: actions)
     }
 
     private func selectFeedMode(_ mode: TopicFeedMode) {
         guard viewModel.selectFeedMode(mode) else { return }
-        sortBarButton.menu = buildSortMenu()
+        updateSortFloatingButtons()
         Task {
             await viewModel.loadTopics()
         }
@@ -440,20 +511,48 @@ final class HomeViewController: ObservableViewController {
         }
     }
 
-    /// Keep the filter button riding directly above the compose FAB, including
-    /// while the FAB is being dragged around.
+    /// 让分类按钮与排序条作为一个整体跟随发帖按钮移动。
     private func syncCategoryFloatingButtonPosition() {
         guard view.bounds.width > 0 else { return }
         let safe = view.safeAreaLayoutGuide.layoutFrame
-        let half = categoryFloatingButtonSize / 2
-        let offset = composeButtonSize / 2 + categoryFloatingButtonSpacing + half
-        // If the FAB sits high enough that the filter would clip off the top,
-        // flip it below instead.
-        let above = composeButton.center.y - offset
-        let below = composeButton.center.y + offset
-        let minY = safe.minY + half
-        let y = above >= minY ? above : min(below, safe.maxY - half)
-        categoryFloatingButton.center = CGPoint(x: composeButton.center.x, y: y)
+        let categoryHalf = categoryFloatingButtonSize / 2
+        let composeHalf = composeButtonSize / 2
+        let categoryAboveOffset = composeHalf + categoryFloatingButtonSpacing + categoryHalf
+        let categoryUpwardExtent = categoryHalf + sortFloatingBarSpacing + sortFloatingBarHeight
+
+        let minimumCategoryY = safe.minY + categoryUpwardExtent
+        let maximumCategoryY = safe.maxY - categoryHalf
+        let categoryAboveY = composeButton.center.y - categoryAboveOffset
+        let categoryBelowY = composeButton.center.y
+            + composeHalf
+            + categoryFloatingButtonSpacing
+            + sortFloatingBarHeight
+            + sortFloatingBarSpacing
+            + categoryHalf
+
+        let categoryY: CGFloat
+        if categoryAboveY >= minimumCategoryY {
+            categoryY = categoryAboveY
+        } else if categoryBelowY <= maximumCategoryY {
+            categoryY = categoryBelowY
+        } else {
+            categoryY = min(max(categoryAboveY, minimumCategoryY), maximumCategoryY)
+        }
+        categoryFloatingButton.center = CGPoint(x: composeButton.center.x, y: categoryY)
+
+        let categoryFrame = categoryFloatingButton.frame
+        let prefersRightAlignment = categoryFloatingButton.center.x >= view.bounds.midX
+        let preferredBarX = prefersRightAlignment
+            ? categoryFrame.maxX - sortFloatingBarWidth
+            : categoryFrame.minX
+        let maximumBarX = max(safe.minX, safe.maxX - sortFloatingBarWidth)
+        let barX = min(max(preferredBarX, safe.minX), maximumBarX)
+        sortFloatingBar.frame = CGRect(
+            x: barX,
+            y: categoryFrame.minY - sortFloatingBarSpacing - sortFloatingBarHeight,
+            width: sortFloatingBarWidth,
+            height: sortFloatingBarHeight
+        )
     }
 
     private func snapComposeButtonToEdge(velocity: CGPoint) {
@@ -564,48 +663,144 @@ final class HomeViewController: ObservableViewController {
         categoryButton.accessibilityValue = title
         categoryButton.accessibilityHint = String(localized: "home.filter.accessibility.hint")
         categoryButton.accessibilityTraits = [.button]
+        categoryFloatingButton.accessibilityValue = title
     }
 
     private func buildCategoryMenuElements() -> [UIMenuElement] {
-        var elements: [UIMenuElement] = []
-
         let allAction = UIAction(
             title: String(localized: "home.filter.all_categories"),
             state: viewModel.selectedCategoryId == nil ? .on : .off
         ) { [weak self] _ in
             self?.selectCategory(nil)
         }
-        elements.append(allAction)
 
-        for cat in viewModel.categories {
-            let state: UIMenuElement.State = viewModel.selectedCategoryId == cat.id ? .on : .off
-            let catColor = Self.color(fromHex: cat.color)
-            let catImage = Self.colorDotImage(color: catColor)
-            let catAction = UIAction(title: cat.name, image: catImage, state: state) { [weak self] _ in
-                self?.selectCategory(cat.id)
-            }
-            if let subs = cat.subcategoryList, !subs.isEmpty {
-                var groupChildren: [UIMenuElement] = [catAction]
-                for sub in subs {
-                    let subState: UIMenuElement.State = viewModel.selectedCategoryId == sub.id ? .on : .off
-                    let subColor = Self.color(fromHex: sub.color)
-                    let subImage = Self.colorDotImage(color: subColor)
-                    let subAction = UIAction(title: sub.name, image: subImage, state: subState) { [weak self] _ in
-                        self?.selectCategory(sub.id)
-                    }
-                    groupChildren.append(subAction)
+        let availableCategories = flattenedCategories()
+        let categoriesByID = Dictionary(
+            availableCategories.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let preferredIDs = preferredCategoryIDs()
+        let preferredIDSet = Set(preferredIDs)
+        let preferredCategories = preferredIDs.compactMap { categoriesByID[$0] }
+
+        var elements: [UIMenuElement] = [allAction]
+        elements.append(contentsOf: preferredCategories.map(makeCategorySelectionAction))
+
+        let addActions = availableCategories
+            .filter { !preferredIDSet.contains($0.id) }
+            .map { category in
+                UIAction(
+                    title: category.name,
+                    image: Self.colorDotImage(color: Self.color(fromHex: category.color))
+                ) { [weak self] _ in
+                    self?.addPreferredCategory(category.id)
                 }
-                elements.append(UIMenu(title: cat.name, image: catImage, children: groupChildren))
-            } else {
-                elements.append(catAction)
+            }
+        if !addActions.isEmpty {
+            elements.append(UIMenu(
+                title: String(localized: "home.filter.add_categories"),
+                image: UIImage(systemName: "plus.circle"),
+                children: addActions
+            ))
+        }
+
+        let removeActions = preferredCategories.map { category in
+            UIAction(
+                title: category.name,
+                image: Self.colorDotImage(color: Self.color(fromHex: category.color)),
+                attributes: .destructive
+            ) { [weak self] _ in
+                self?.removePreferredCategory(category.id)
             }
         }
+        if !removeActions.isEmpty {
+            elements.append(UIMenu(
+                title: String(localized: "home.filter.remove_categories"),
+                image: UIImage(systemName: "minus.circle"),
+                children: removeActions
+            ))
+        }
         return elements
+    }
+
+    private func makeCategorySelectionAction(_ category: DiscourseCategory) -> UIAction {
+        let state: UIMenuElement.State = viewModel.selectedCategoryId == category.id ? .on : .off
+        return UIAction(
+            title: category.name,
+            image: Self.colorDotImage(color: Self.color(fromHex: category.color)),
+            state: state
+        ) { [weak self] _ in
+            self?.selectCategory(category.id)
+        }
+    }
+
+    private func flattenedCategories() -> [DiscourseCategory] {
+        var result: [DiscourseCategory] = []
+        var seen = Set<Int>()
+
+        func append(_ categories: [DiscourseCategory]) {
+            for category in categories where seen.insert(category.id).inserted {
+                result.append(category)
+                if let subcategories = category.subcategoryList {
+                    append(subcategories)
+                }
+            }
+        }
+
+        append(viewModel.categories)
+        return result
+    }
+
+    private func preferredCategoryIDs() -> [Int] {
+        let settings = AppSettings.shared
+        if let storedIDs = settings.homeCategoryIDs(for: api.baseURL) {
+            return storedIDs
+        }
+        let categories = flattenedCategories()
+        guard !categories.isEmpty else { return [] }
+        let defaultIDs: [Int]
+        if api.isLinuxDo {
+            defaultIDs = Self.linuxDoDefaultCategoryNames.compactMap { name in
+                categories.first(where: { $0.name == name })?.id
+            }
+        } else {
+            defaultIDs = categories.map(\.id)
+        }
+        settings.setHomeCategoryIDs(defaultIDs, for: api.baseURL)
+        return defaultIDs
+    }
+
+    private func addPreferredCategory(_ categoryID: Int) {
+        var categoryIDs = preferredCategoryIDs()
+        guard !categoryIDs.contains(categoryID) else { return }
+        categoryIDs.append(categoryID)
+        AppSettings.shared.setHomeCategoryIDs(categoryIDs, for: api.baseURL)
+        updateCategoryMenus()
+    }
+
+    private func removePreferredCategory(_ categoryID: Int) {
+        var categoryIDs = preferredCategoryIDs()
+        guard categoryIDs.contains(categoryID) else { return }
+        categoryIDs.removeAll { $0 == categoryID }
+        AppSettings.shared.setHomeCategoryIDs(categoryIDs, for: api.baseURL)
+
+        if viewModel.selectedCategoryId == categoryID {
+            selectCategory(nil)
+        } else {
+            updateCategoryMenus()
+        }
+    }
+
+    private func updateCategoryMenus() {
+        let categoryMenu = UIMenu(title: "", children: buildCategoryMenuElements())
+        categoryButton.menu = categoryMenu
+        categoryFloatingButton.menu = categoryMenu
     }
 
     private func selectCategory(_ categoryId: Int?) {
         guard viewModel.selectCategory(categoryId) else { return }
         updateCategoryButton()
+        updateCategoryMenus()
         Task {
             await viewModel.loadTopics()
         }
@@ -620,15 +815,6 @@ final class HomeViewController: ObservableViewController {
             blue: CGFloat(rgb & 0xFF) / 255,
             alpha: 1
         )
-    }
-
-    private static func makeRightBarSpacer() -> UIBarButtonItem {
-        if #available(iOS 26.0, *) {
-            return .fixedSpace()
-        }
-        let spacer = UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
-        spacer.width = 16
-        return spacer
     }
 
     private static func colorDotImage(color: UIColor?) -> UIImage? {
