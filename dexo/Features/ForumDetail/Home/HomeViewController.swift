@@ -114,30 +114,25 @@ final class HomeViewController: ObservableViewController {
         return button
     }()
 
-    private let composeButtonSize: CGFloat = 56
+    private let floatingButtonSize: CGFloat = 56
     private let composeButtonEdgeMargin: CGFloat = 20
     private var composeDragDistance: CGFloat = 0
 
     /// Thumb-reachable twin of the nav-bar category filter. The nav bar sits in
     /// the top-left corner, which one-handed right-thumb users can't reach on a
     /// large phone, so the same menu is mirrored just above the compose FAB.
-    private let categoryFloatingButtonSize: CGFloat = 46
-    /// Gap between the compose FAB and the filter button stacked above it.
-    private let categoryFloatingButtonSpacing: CGFloat = 12
-    private let sortFloatingBarHeight: CGFloat = 44
-    private let sortFloatingBarSpacing: CGFloat = 8
-    private let sortFloatingBarWidth: CGFloat = 176
+    private let floatingButtonSpacing: CGFloat = 12
 
     private lazy var categoryFloatingButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        let config = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
         button.setImage(
             UIImage(systemName: "line.3.horizontal.decrease", withConfiguration: config),
             for: .normal
         )
         button.backgroundColor = ThemeManager.shared.cardBackgroundColor
         button.tintColor = ThemeManager.shared.accentColor
-        button.layer.cornerRadius = categoryFloatingButtonSize / 2
+        button.layer.cornerRadius = floatingButtonSize / 2
         button.layer.shadowColor = UIColor.black.cgColor
         button.layer.shadowOpacity = 0.2
         button.layer.shadowOffset = CGSize(width: 0, height: 2)
@@ -148,50 +143,24 @@ final class HomeViewController: ObservableViewController {
         return button
     }()
 
-    private lazy var sortFloatingItems: [(mode: TopicFeedMode, button: UIButton)] = [
-        (.activity, makeSortFloatingButton(
-            mode: .activity,
-            title: String(localized: "home.activity"),
-            symbol: "clock.arrow.circlepath"
-        )),
-        (.created, makeSortFloatingButton(
-            mode: .created,
-            title: String(localized: "home.created"),
-            symbol: "calendar"
-        )),
-        (.hot, makeSortFloatingButton(
-            mode: .hot,
-            title: String(localized: "home.hot"),
-            symbol: "flame"
-        )),
-        (.top, makeSortFloatingButton(
-            mode: .top,
-            title: String(localized: "home.top"),
-            symbol: "chart.bar"
-        )),
-    ]
-
-    private lazy var sortFloatingBar: UIView = {
-        let bar = UIView()
-        bar.layer.cornerRadius = sortFloatingBarHeight / 2
-        bar.layer.shadowColor = UIColor.black.cgColor
-        bar.layer.shadowOpacity = 0.2
-        bar.layer.shadowOffset = CGSize(width: 0, height: 2)
-        bar.layer.shadowRadius = 4
-        bar.isAccessibilityElement = false
-
-        let stack = UIStackView(arrangedSubviews: sortFloatingItems.map(\.button))
-        stack.axis = .horizontal
-        stack.distribution = .fillEqually
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        bar.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: bar.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
-            stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
-        ])
-        return bar
+    private lazy var sortFloatingButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
+        button.setImage(
+            UIImage(systemName: "arrow.up.arrow.down", withConfiguration: config),
+            for: .normal
+        )
+        button.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        button.tintColor = ThemeManager.shared.accentColor
+        button.layer.cornerRadius = floatingButtonSize / 2
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.2
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 4
+        button.showsMenuAsPrimaryAction = true
+        button.accessibilityLabel = String(localized: "home.sort.accessibility.label")
+        button.accessibilityIdentifier = "home.sort"
+        return button
     }()
 
     private lazy var composeButton: UIButton = {
@@ -200,13 +169,14 @@ final class HomeViewController: ObservableViewController {
         button.setImage(UIImage(systemName: "plus", withConfiguration: config), for: .normal)
         button.backgroundColor = ThemeManager.shared.accentColor
         button.tintColor = .white
-        button.layer.cornerRadius = 28
+        button.layer.cornerRadius = floatingButtonSize / 2
         button.layer.shadowColor = UIColor.black.cgColor
         button.layer.shadowOpacity = 0.25
         button.layer.shadowOffset = CGSize(width: 0, height: 2)
         button.layer.shadowRadius = 4
         button.addTarget(self, action: #selector(composeButtonTouchDown), for: .touchDown)
         button.addTarget(self, action: #selector(composeTapped), for: .touchUpInside)
+        button.accessibilityLabel = String(localized: "compose.title")
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handleComposePan(_:)))
         button.addGestureRecognizer(pan)
@@ -241,11 +211,11 @@ final class HomeViewController: ObservableViewController {
             hasPlacedComposeButton = true
             let safe = view.safeAreaLayoutGuide.layoutFrame
             composeButton.center = CGPoint(
-                x: safe.maxX - composeButtonEdgeMargin - composeButtonSize / 2,
-                y: safe.maxY - composeButtonEdgeMargin - composeButtonSize / 2
+                x: safe.maxX - composeButtonEdgeMargin - floatingButtonSize / 2,
+                y: safe.maxY - composeButtonEdgeMargin - floatingButtonSize / 2
             )
         }
-        syncCategoryFloatingButtonPosition()
+        syncFloatingButtonPositions()
 
         if tableView.tableHeaderView === pinnedBar,
            pinnedBar.frame.width != tableView.bounds.width {
@@ -321,20 +291,20 @@ final class HomeViewController: ObservableViewController {
         navigationItem.rightBarButtonItems = inheritedRightBarItems
 
         view.addSubview(composeButton)
-        composeButton.frame = CGRect(x: 0, y: 0, width: composeButtonSize, height: composeButtonSize)
+        composeButton.frame = CGRect(x: 0, y: 0, width: floatingButtonSize, height: floatingButtonSize)
         view.addSubview(categoryFloatingButton)
         categoryFloatingButton.frame = CGRect(
             x: 0,
             y: 0,
-            width: categoryFloatingButtonSize,
-            height: categoryFloatingButtonSize
+            width: floatingButtonSize,
+            height: floatingButtonSize
         )
-        view.addSubview(sortFloatingBar)
-        sortFloatingBar.frame = CGRect(
+        view.addSubview(sortFloatingButton)
+        sortFloatingButton.frame = CGRect(
             x: 0,
             y: 0,
-            width: sortFloatingBarWidth,
-            height: sortFloatingBarHeight
+            width: floatingButtonSize,
+            height: floatingButtonSize
         )
 
         Task {
@@ -370,8 +340,9 @@ final class HomeViewController: ObservableViewController {
             errorLabel.isHidden = false
             loginButton.isHidden = false
             tableView.isHidden = true
-            sortFloatingBar.isHidden = true
+            sortFloatingButton.isHidden = true
             categoryFloatingButton.isHidden = true
+            composeButton.isHidden = true
             navigationItem.rightBarButtonItems = inheritedRightBarItems
             activityIndicator.stopAnimating()
             return
@@ -379,15 +350,17 @@ final class HomeViewController: ObservableViewController {
 
         loginButton.isHidden = true
         tableView.isHidden = false
-        sortFloatingBar.isHidden = false
+        sortFloatingButton.isHidden = false
         categoryFloatingButton.isHidden = false
+        composeButton.isHidden = false
         navigationItem.rightBarButtonItems = inheritedRightBarItems
         composeButton.backgroundColor = ThemeManager.shared.accentColor
         updateCategoryMenus()
         categoryFloatingButton.backgroundColor = ThemeManager.shared.cardBackgroundColor
         categoryFloatingButton.tintColor = ThemeManager.shared.accentColor
-        sortFloatingBar.backgroundColor = ThemeManager.shared.cardBackgroundColor
-        updateSortFloatingButtons()
+        sortFloatingButton.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        sortFloatingButton.tintColor = ThemeManager.shared.accentColor
+        updateSortMenu()
         updateCategoryButton()
         // Show non-login errors (e.g. rate limit) when topic list is empty
         if let error = viewModel.errorMessage, viewModel.topics.isEmpty {
@@ -441,44 +414,26 @@ final class HomeViewController: ObservableViewController {
         }
     }
 
-    private func makeSortFloatingButton(
-        mode: TopicFeedMode,
-        title: String,
-        symbol: String
-    ) -> UIButton {
-        let button = UIButton(type: .system)
-        button.setImage(
-            UIImage(
-                systemName: symbol,
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
-            ),
-            for: .normal
-        )
-        button.layer.cornerRadius = 10
-        button.accessibilityLabel = title
-        button.accessibilityIdentifier = "home.sort.\(mode.rawValue)"
-        button.addAction(UIAction { [weak self] _ in
-            self?.selectFeedMode(mode)
-        }, for: .touchUpInside)
-        return button
-    }
-
-    private func updateSortFloatingButtons() {
-        let accentColor = ThemeManager.shared.accentColor
-        for item in sortFloatingItems {
-            let isSelected = item.mode == viewModel.feedMode
-            item.button.isSelected = isSelected
-            item.button.tintColor = isSelected ? accentColor : .secondaryLabel
-            item.button.backgroundColor = isSelected
-                ? accentColor.withAlphaComponent(0.16)
-                : .clear
-            item.button.accessibilityTraits = isSelected ? [.button, .selected] : .button
+    private func updateSortMenu() {
+        let modes: [(TopicFeedMode, String, String)] = [
+            (.activity, String(localized: "home.activity"), "clock.arrow.circlepath"),
+            (.created, String(localized: "home.created"), "calendar"),
+            (.hot, String(localized: "home.hot"), "flame"),
+            (.top, String(localized: "home.top"), "chart.bar"),
+        ]
+        let actions = modes.map { mode, title, symbol -> UIAction in
+            let state: UIMenuElement.State = viewModel.feedMode == mode ? .on : .off
+            return UIAction(title: title, image: UIImage(systemName: symbol), state: state) { [weak self] _ in
+                self?.selectFeedMode(mode)
+            }
         }
+        sortFloatingButton.menu = UIMenu(title: "", children: actions)
+        sortFloatingButton.accessibilityValue = modes.first { $0.0 == viewModel.feedMode }?.1
     }
 
     private func selectFeedMode(_ mode: TopicFeedMode) {
         guard viewModel.selectFeedMode(mode) else { return }
-        updateSortFloatingButtons()
+        updateSortMenu()
         Task {
             await viewModel.loadTopics()
         }
@@ -501,7 +456,7 @@ final class HomeViewController: ObservableViewController {
                 x: composeButton.center.x + translation.x,
                 y: composeButton.center.y + translation.y
             )
-            syncCategoryFloatingButtonPosition()
+            syncFloatingButtonPositions()
             composeDragDistance += abs(translation.x) + abs(translation.y)
             gesture.setTranslation(.zero, in: view)
         case .ended, .cancelled:
@@ -511,54 +466,33 @@ final class HomeViewController: ObservableViewController {
         }
     }
 
-    /// 让分类按钮与排序条作为一个整体跟随发帖按钮移动。
-    private func syncCategoryFloatingButtonPosition() {
+    /// 让排序和分类按钮作为一个整体跟随发帖按钮移动。
+    private func syncFloatingButtonPositions() {
         guard view.bounds.width > 0 else { return }
         let safe = view.safeAreaLayoutGuide.layoutFrame
-        let categoryHalf = categoryFloatingButtonSize / 2
-        let composeHalf = composeButtonSize / 2
-        let categoryAboveOffset = composeHalf + categoryFloatingButtonSpacing + categoryHalf
-        let categoryUpwardExtent = categoryHalf + sortFloatingBarSpacing + sortFloatingBarHeight
+        let buttonHalf = floatingButtonSize / 2
+        let buttonStep = floatingButtonSize + floatingButtonSpacing
+        let sortAboveY = composeButton.center.y - buttonStep * 2
+        let sortBelowY = composeButton.center.y + buttonStep * 2
+        let canPlaceAbove = sortAboveY - buttonHalf >= safe.minY
+        let canPlaceBelow = sortBelowY + buttonHalf <= safe.maxY
+        let placeAbove = canPlaceAbove || (!canPlaceBelow && composeButton.center.y >= safe.midY)
+        let direction: CGFloat = placeAbove ? -1 : 1
 
-        let minimumCategoryY = safe.minY + categoryUpwardExtent
-        let maximumCategoryY = safe.maxY - categoryHalf
-        let categoryAboveY = composeButton.center.y - categoryAboveOffset
-        let categoryBelowY = composeButton.center.y
-            + composeHalf
-            + categoryFloatingButtonSpacing
-            + sortFloatingBarHeight
-            + sortFloatingBarSpacing
-            + categoryHalf
-
-        let categoryY: CGFloat
-        if categoryAboveY >= minimumCategoryY {
-            categoryY = categoryAboveY
-        } else if categoryBelowY <= maximumCategoryY {
-            categoryY = categoryBelowY
-        } else {
-            categoryY = min(max(categoryAboveY, minimumCategoryY), maximumCategoryY)
-        }
-        categoryFloatingButton.center = CGPoint(x: composeButton.center.x, y: categoryY)
-
-        let categoryFrame = categoryFloatingButton.frame
-        let prefersRightAlignment = categoryFloatingButton.center.x >= view.bounds.midX
-        let preferredBarX = prefersRightAlignment
-            ? categoryFrame.maxX - sortFloatingBarWidth
-            : categoryFrame.minX
-        let maximumBarX = max(safe.minX, safe.maxX - sortFloatingBarWidth)
-        let barX = min(max(preferredBarX, safe.minX), maximumBarX)
-        sortFloatingBar.frame = CGRect(
-            x: barX,
-            y: categoryFrame.minY - sortFloatingBarSpacing - sortFloatingBarHeight,
-            width: sortFloatingBarWidth,
-            height: sortFloatingBarHeight
+        categoryFloatingButton.center = CGPoint(
+            x: composeButton.center.x,
+            y: composeButton.center.y + direction * buttonStep
+        )
+        sortFloatingButton.center = CGPoint(
+            x: composeButton.center.x,
+            y: composeButton.center.y + direction * buttonStep * 2
         )
     }
 
     private func snapComposeButtonToEdge(velocity: CGPoint) {
         let safe = view.safeAreaLayoutGuide.layoutFrame
         let margin = composeButtonEdgeMargin
-        let half = composeButtonSize / 2
+        let half = floatingButtonSize / 2
         let center = composeButton.center
 
         // Determine left or right based on position + velocity bias
@@ -584,7 +518,7 @@ final class HomeViewController: ObservableViewController {
             options: .curveEaseOut
         ) {
             self.composeButton.center = CGPoint(x: targetX, y: targetY)
-            self.syncCategoryFloatingButtonPosition()
+            self.syncFloatingButtonPositions()
         }
     }
 
